@@ -1,0 +1,12 @@
+assets
+__pycache__
+reference.py
+*.log
+*.pyc
+*.txt
+*.pptx
+*.ppt
+*.sda
+*.ico
+*.json
+*.spec
