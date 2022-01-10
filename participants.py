@@ -1787,6 +1787,7 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
 if __name__ == '__main__':
     INIT_TIME = time.time()
     ## Create Application
+    
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
