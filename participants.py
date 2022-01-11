@@ -246,9 +246,9 @@ class Data(object):
         Uses indention of 4 and sorted keys by default.
         Can be processed with other data if 2nd argument is specified.
         """
-        if data is None: DATA = DCFG
+        if data is None: data = DCFG
         with open(SYS.FILE_DATA, "w") as write:
-            json.dump(DATA, write, indent=indent, sort_keys=sort_keys)
+            json.dump(data, write, indent=indent, sort_keys=sort_keys)
 
     
     def generateDefault(self):
@@ -967,7 +967,11 @@ class Fields(object):
         Initiates the first run of field generation for setup.
         Usually triggered after setting up the UI
         """
-        self.addFields(len(DCFG['POOL']['ROLES']))
+        LENGTH = len(DCFG['POOL']['ROLES'])
+        if not LENGTH:
+            PDB.generateDefault()
+            LENGTH = 1
+        self.addFields(LENGTH)
         self.updateItems()
         self.refreshStates()
 
