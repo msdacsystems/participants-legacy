@@ -35,7 +35,7 @@ import sys
 
 
 try:
-    import os, psutil, winreg, time, datetime, json, shutil, gc, win32api
+    import os, psutil, winreg, time, datetime, json, shutil, gc
     from PyQt5 import QtCore, QtGui, QtWidgets
     from PyQt5.QtCore import Qt
     from PyQt5.QtGui import QFont
@@ -1572,6 +1572,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.setWindowTitle("Participants")
 
         ## Head
+        self.PIX_HEADER.setToolTip(f"v{SW.VERSION} {SW.VERSION_NAME}\nMade for Seventh-day Adventist Church\n\n© {SW.PROD_YEAR} {SW.AUTHOR}")
         self.LBL_EXPORT.setText("Export to")
 
         ## Body
