@@ -20,8 +20,8 @@ Spacing Gap Formats:
 
 Disclaimer:
     This is an experimental program and we are aware that this software is slow
-    due to Python's nature of interpreting code at runtime instead of compiling it
-    first. We are planning to switch to a better codebase later on though.
+    due to Python's nature of interpreting code at runtime which affects speed.
+    We are planning to switch to a better codebase later on though.
 
 
 This program is part of MSDAC System's collection of softwares
@@ -163,7 +163,7 @@ class System(object):
         self.DUPLICATED = False
         DUPLICATES = list(filter(lambda x: x == SYS.PROCESS_NAME, [i.name() for i in psutil.process_iter()]))
         
-        if len(DUPLICATES) > 1:
+        if len(DUPLICATES) > 2:
             MSG_BOX = QtWidgets.QMessageBox()
             MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
@@ -1791,7 +1791,7 @@ if __name__ == '__main__':
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
-    SW = KSoftware("Participants", "1.0", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Alpha")
+    SW = KSoftware("Participants", "1.0.1", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Alpha")
     LOG = KLog(System().DIR_LOG, __file__, SW.LOG_NAME_DATE(), SW.PY_NAME, SW.AUTHOR, cont=True, tms=True, delete_existing=True, tmsformat="%H:%M:%S.%f %m/%d/%y")
 
     SYS = System()
