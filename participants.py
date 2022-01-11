@@ -46,7 +46,7 @@ try:
     from kenverdadero.KCore import KPath, KString
     from kenverdadero.KLogging import KLog
     from kenverdadero.KSoftware import KSoftware
-    from kenverdadero.KCore.KCore import modHex, p
+    from kenverdadero.KCore.KCore import modHex, p, showLatency
 except ImportError as e:
     print(f'Module not found: {e}')
     sys.exit()
@@ -354,7 +354,7 @@ class Stylesheet(object):
             UIA.setStyleSheet(SS)
         except (NameError, AttributeError) as e:
             pass
-    
+
 
     def QCl(self, c):
         """
@@ -551,6 +551,41 @@ class Stylesheet(object):
                 }}
 
 
+
+                /* Set Active Button  */ 
+                QPushButton#BTN_ATVS {{
+                    background-color: none;
+                    border: none;
+                    image: none;
+                }}
+
+                QPushButton::hover#BTN_ATVS {{
+                    image: url('./res/icons/radio_translucent_hover.png');
+                }}
+
+                QPushButton::disabled#BTN_ATVS {{
+                    image: url('./res/icons/radio_disabled.png');
+                }}
+
+
+
+                /* Set Active Button SELECTED */ 
+                QPushButton#BTN_ATVS_SELECTED {{
+                    background-color: none;
+                    border: none;
+                    image: url('./res/icons/radio_selected.png');
+                }}
+
+                QPushButton::hover#BTN_ATVS_SELECTED {{
+                    image: url('./res/icons/radio_selected_hover.png');
+                }}
+
+                QPushButton::disabled#BTN_ATVS_SELECTED {{
+                    image: url('./res/icons/select_radio_disabled.png');
+                }}
+
+
+
                 /* Insert/Add Button */ 
                 QPushButton#BTN_INSS {{
                     background-color: none;
@@ -646,20 +681,23 @@ class Stylesheet(object):
                     border-radius: {RADIUS};
                     padding: {PADDING};
                 }}
-                QComboBox {{
-                    background-color: transparent;
-                    border: 1px solid {self.BORDER};
-                }}
-
-                QComboBox::hover {{
-                    background-color: transparent;
-                    border: 1px solid {self.SECONDARY};
-                }}
                 QLineEdit::focus#LNE_SEARCH {{
                     background-color: #AF{self.BORDER[1:]};
                 }}
                 QLineEdit::hover#LNE_SEARCH {{
                     border: 1px solid {self.BORDER_HIGHLIGHT};
+                }}
+
+
+
+                /* Combo Boxes */
+                QComboBox {{
+                    background-color: transparent;
+                    border: 1px solid {self.BORDER};
+                }}
+                QComboBox::hover {{
+                    background-color: transparent;
+                    border: 1px solid {self.SECONDARY};
                 }}
 
                 QComboBox#CBX_RLS {{
@@ -668,6 +706,7 @@ class Stylesheet(object):
                 QComboBox#CBX_NMS {{
                     margin-bottom: 1px;
                 }}
+
 
 
                 /* Sliders */
@@ -956,9 +995,10 @@ class Fields(object):
         """
         Constructor
         """
-        self.CBX_RLS, self.CBX_NMS, self.BTN_REMS, self.BTN_INSS = [], [], [], []
+        self.CBX_RLS, self.CBX_NMS, self.BTN_REMS, self.BTN_INSS, self.BTN_ATVS = [], [], [], [], []
         self.FIELDS = 0
         self.FIELDS_MAX = 20
+        self.LAST_SELECTED = None
 
 
     def setup(self):
@@ -986,17 +1026,24 @@ class Fields(object):
         ## Reconnect Buttons
         for i in range(len(self.BTN_REMS)):                                                 ## Loops through every single button object based on BTN_REMS or BTN_INSS
             try:
+                self.BTN_ATVS[i].clicked.disconnect()
                 self.BTN_INSS[i].clicked.disconnect()
                 self.BTN_REMS[i].clicked.disconnect()
             except Exception:                                                               ## Throws exception when the buttons aren't connected yet which is not valid in the disconnect method
                 pass
             finally:                                                                        ## Always connect the Add and Remove button to its main method
+                self.BTN_ATVS[i].clicked.connect(lambda: self.setActiveField())
                 self.BTN_INSS[i].clicked.connect(lambda: self.redirectFieldInsertion())
                 self.BTN_REMS[i].clicked.connect(lambda: self.removeField())
         
         ## Prevent Overflow
         for btn in self.BTN_INSS:
-            btn.setEnabled(False if self.FIELDS >= self.FIELDS_MAX else True)               ## Sets the button to whether Enabled or Disabled depending on how many fields are active
+            if self.FIELDS >= self.FIELDS_MAX:
+                btn.setEnabled(False)               ## Sets the button to whether Enabled or Disabled depending on how many fields are active
+                btn.setToolTip("")
+            else:
+                btn.setEnabled(True)
+                btn.setToolTip("Add new field below")
 
         ## Prevent Depletion
         try:
@@ -1015,6 +1062,41 @@ class Fields(object):
         for i, btn in enumerate(self.BTN_INSS):
             if btn.hasFocus():
                 self.insertField(i)
+                break
+
+
+    def setActiveField(self):
+        """
+        Sets an active field by exporting its current values into a text file 
+        to be read by a Text Source from OBS Studio
+        """
+        for i, btn in enumerate(self.BTN_ATVS):
+            if btn.hasFocus():
+                if btn.objectName() == 'BTN_ATVS_SELECTED':
+                    ## Deselect the field from being active
+                    EXP.fromActiveField(i, True)
+                    btn.setObjectName('BTN_ATVS')
+                else:
+                    ## When the triggered button is found, determine the last index to say
+                    ## goodbye from being active and return into a normal state.
+                    if self.LAST_SELECTED is not None:
+                        POINTER = self.LAST_SELECTED
+                        try:
+                            self.BTN_ATVS[POINTER]
+                        except IndexError:
+                            POINTER = len(self.BTN_ATVS)-1
+                        finally:
+                            self.BTN_ATVS[POINTER].setObjectName('BTN_ATVS')
+                            self.BTN_ATVS[POINTER].setToolTip('Set as active')
+                            self.BTN_ATVS[POINTER].setStyleSheet(QSS.getStylesheet())
+
+                    ## Set the focused button to be active and export the file
+                    EXP.fromActiveField(i)
+                    btn.setObjectName('BTN_ATVS_SELECTED')
+                    btn.setToolTip('Deselect from being active')
+                    self.LAST_SELECTED = i
+
+                btn.setStyleSheet(QSS.getStylesheet())
                 break
 
 
@@ -1058,6 +1140,7 @@ class Fields(object):
         self.CBX_RLS.insert(pos, None)
         self.CBX_NMS.insert(pos, None)
         self.BTN_REMS.insert(pos, None)
+        self.BTN_ATVS.insert(pos, None)
         self.BTN_INSS.insert(pos, None)
 
         if pos == len(self.CBX_RLS): pos -= 1                                                   ## When the pos is at the last index, decrease by 1 to compensate with zero-indexing
@@ -1085,23 +1168,28 @@ class Fields(object):
         self.CBX_NMS[pos].addItems(NMS)
         self.CBX_NMS[pos].setCurrentText('')
 
+        self.BTN_ATVS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
+        self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
+        self.BTN_ATVS[pos].setMaximumWidth(25)
+        self.BTN_ATVS[pos].setMinimumHeight(30)
+        self.BTN_ATVS[pos].setToolTip("Set as active text")
+
         self.BTN_INSS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
         self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
-        self.BTN_INSS[pos].setMaximumWidth(25)
-        self.BTN_INSS[pos].setMinimumWidth(28)
+        self.BTN_INSS[pos].setMaximumWidth(26)
         self.BTN_INSS[pos].setMinimumHeight(30)
         self.BTN_INSS[pos].setToolTip("Add new field below")
 
         self.BTN_REMS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
         self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
         self.BTN_REMS[pos].setMaximumWidth(25)
-        self.BTN_REMS[pos].setMinimumWidth(28)
         self.BTN_REMS[pos].setMinimumHeight(30)
         self.BTN_REMS[pos].setToolTip("Remove this field")
 
         ## Finally adds those widgets into vertical layouts
         UIA.LYT_ROLES.insertWidget(pos, self.CBX_RLS[pos])
         UIA.LYT_NAMES.insertWidget(pos, self.CBX_NMS[pos])
+        UIA.LYT_ACTIV.insertWidget(pos, self.BTN_ATVS[pos])
         UIA.LYT_CLEAR.insertWidget(pos, self.BTN_REMS[pos])
         UIA.LYT_INSRT.insertWidget(pos, self.BTN_INSS[pos])
 
@@ -1124,13 +1212,15 @@ class Fields(object):
             if btn.hasFocus():
                 UIA.LYT_ROLES.removeWidget(self.CBX_RLS[i])
                 UIA.LYT_NAMES.removeWidget(self.CBX_NMS[i])
-                UIA.LYT_CLEAR.removeWidget(self.BTN_REMS[i])
+                UIA.LYT_INSRT.removeWidget(self.BTN_ATVS[i])
                 UIA.LYT_INSRT.removeWidget(self.BTN_INSS[i])
+                UIA.LYT_CLEAR.removeWidget(self.BTN_REMS[i])
 
                 del self.CBX_RLS[i]
                 del self.CBX_NMS[i]
                 del self.BTN_REMS[i]
                 del self.BTN_INSS[i]
+                del self.BTN_ATVS[i]
                 self.FIELDS -= 1
                 self.refreshStates()
                 gc.collect()
@@ -1210,6 +1300,22 @@ class Export(object):
     """
     def __init__(self):
         pass
+
+    
+    def fromActiveField(self, i, clear=False):
+        """
+        Exports file from an active field
+        """
+        if clear: R, N = '', ''
+        else: R, N = FLD.CBX_RLS[i].currentText(), FLD.CBX_NMS[i].currentText() 
+
+        try:
+            with open(f"{SYS.DIR_PROGRAM}/Role.txt", "w") as f: f.write(R)
+            with open(f"{SYS.DIR_PROGRAM}/Name.txt", "w") as f: f.write(N)
+            # if not clear: LOG.info(f"Active field exported: {R} - {N}")
+        except Exception as e:
+            LOG.error(e)
+            
 
 
     def toPlainText(self):
@@ -1501,6 +1607,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.LYT_NAMES = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_NAMES")
         self.LYT_CLEAR = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_CLEAR")
         self.LYT_INSRT = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_INSRT")
+        self.LYT_ACTIV = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_ACTIV")
         
         ## Banner
         self.PIX_HEADER = QtWidgets.QLabel(self.WGT_CENTRAL); self.PIX_HEADER.setObjectName("PIX_HEADER"); self.PIX_HEADER.setAlignment(QtCore.Qt.AlignCenter)        
@@ -1546,8 +1653,9 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.LYT_BODY.addItem(SPC_BODYH, 0, 1, 1, 1)
         self.LYT_BODY.addWidget(self.LBL_NM, 0, 2, 1, 1)
         self.LYT_BODY.addLayout(self.LYT_NAMES, 1, 2, 1, 1)
-        self.LYT_BODY.addLayout(self.LYT_INSRT, 1, 3, 1, 1)
-        self.LYT_BODY.addLayout(self.LYT_CLEAR, 1, 4, 1, 1)
+        self.LYT_BODY.addLayout(self.LYT_ACTIV, 1, 3, 1, 1)
+        self.LYT_BODY.addLayout(self.LYT_INSRT, 1, 4, 1, 1)
+        self.LYT_BODY.addLayout(self.LYT_CLEAR, 1, 5, 1, 1)
 
         ## Window
         self.LYT_MAIN.addLayout(self.LYT_HEAD, 0, 1, 1, 1)
@@ -1799,7 +1907,7 @@ if __name__ == '__main__':
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
-    SW = KSoftware("Participants", "1.0.1", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Alpha")
+    SW = KSoftware("Participants", "1.0.3", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Alpha")
     LOG = KLog(System().DIR_LOG, __file__, SW.LOG_NAME_DATE(), SW.PY_NAME, SW.AUTHOR, cont=True, tms=True, delete_existing=True, tmsformat="%H:%M:%S.%f %m/%d/%y")
 
     SYS = System()
@@ -1835,6 +1943,7 @@ if __name__ == '__main__':
     UIA.show()
     CORE.centerWindow(UIA)
     UIA.raise_()
+    UIA.activateWindow()
 
     SYS.STARTUP_TIME = time.time()-INIT_TIME
     LOG.info(f'Initialization completed in {round(SYS.STARTUP_TIME, 3)} seconds.')
