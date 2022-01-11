@@ -263,7 +263,6 @@ class Data(object):
                 "NAMES": ['MSDAC Systems']
             },
             "CONFIG": {
-                "IMG_BACKGROUND": "BG.png"
             }
         }
         self.dump(DATA)
@@ -1617,8 +1616,12 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
         """
         Initializes all widgets for UIB
         """
+        ## Window
         self.setObjectName("WIN_SETTINGS")
         self.setFixedSize(QtCore.QSize(380, 320))
+        self.setWindowIcon(QtGui.QIcon(SYS.RES_LOGO))
+
+
         self.GRID_MAIN = QtWidgets.QGridLayout(self); self.GRID_MAIN.setObjectName("GRID_MAIN")
         self.GRID_BODY = QtWidgets.QGridLayout(); self.GRID_BODY.setObjectName("GRID_BODY")
         self.LYT_HBUTTONS = QtWidgets.QHBoxLayout(); self.LYT_HBUTTONS.setObjectName("LYT_HBUTTONS")
