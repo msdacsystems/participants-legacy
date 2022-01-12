@@ -240,7 +240,7 @@ class Data(object):
                     return DATA
         
 
-    def dump(self, data=None, indent=4, sort_keys=True):
+    def dump(self, data=None, indent=None, sort_keys=False):
         """
         Saves the passed data to system's data file.
         Uses indention of 4 and sorted keys by default.
@@ -620,6 +620,23 @@ class Stylesheet(object):
 
 
 
+                /* Save List Button */
+                QPushButton#BTN_SAVELIST {{
+                    background-color: none;
+                    border: none;
+                    image: url('./res/icons/save.png');
+                }}
+
+                QPushButton::hover#BTN_SAVELIST {{
+                    image: url('./res/icons/save_hover.png');
+                }}
+
+                QPushButton::disabled#BTN_SAVELIST {{
+                    image: url('./res/icons/save_disabled.png');
+                }}
+
+
+
                 /* Settings Button (Gear) */ 
                 QPushButton#BTN_SETTINGS {{
                     background-color: none;
@@ -934,7 +951,7 @@ class Package(object):
                         setattr(self, obj[1], DCFG["CONFIG"][obj[1]])
                         break
             except Exception as e:
-                LOG.warn(f"Can't load {e}")
+                pass
 
         LOG.info('Successfully loaded configuration.')
 
@@ -998,7 +1015,7 @@ class Fields(object):
         self.CBX_RLS, self.CBX_NMS, self.BTN_REMS, self.BTN_INSS, self.BTN_ATVS = [], [], [], [], []
         self.FIELDS = 0
         self.FIELDS_MAX = 20
-        self.LAST_SELECTED = None
+        self.PREV_ACTIVE = None
 
 
     def setup(self):
@@ -1073,14 +1090,14 @@ class Fields(object):
         for i, btn in enumerate(self.BTN_ATVS):
             if btn.hasFocus():
                 if btn.objectName() == 'BTN_ATVS_SELECTED':
-                    ## Deselect the field from being active
+                    ## Unset the field from being active
                     EXP.fromActiveField(i, True)
                     btn.setObjectName('BTN_ATVS')
                 else:
-                    ## When the triggered button is found, determine the last index to say
-                    ## goodbye from being active and return into a normal state.
-                    if self.LAST_SELECTED is not None:
-                        POINTER = self.LAST_SELECTED
+                    ## Before setting the triggered button to active, determine the previous
+                    ## index to unset from being active and return into a normal state.
+                    if self.PREV_ACTIVE is not None:
+                        POINTER = self.PREV_ACTIVE
                         try:
                             self.BTN_ATVS[POINTER]
                         except IndexError:
@@ -1093,8 +1110,8 @@ class Fields(object):
                     ## Set the focused button to be active and export the file
                     EXP.fromActiveField(i)
                     btn.setObjectName('BTN_ATVS_SELECTED')
-                    btn.setToolTip('Deselect from being active')
-                    self.LAST_SELECTED = i
+                    btn.setToolTip('Unset from being active')
+                    self.PREV_ACTIVE = i
 
                 btn.setStyleSheet(QSS.getStylesheet())
                 break
@@ -1617,6 +1634,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         SPC_WINV_TOPP = QtWidgets.QSpacerItem(20, 15, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
         SPC_TITLEV2 = QtWidgets.QSpacerItem(20, 15, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
         self.BTN_SETTINGS = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_SETTINGS.setObjectName("BTN_SETTINGS")
+        self.BTN_SAVELIST = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_SAVELIST.setObjectName("BTN_SAVELIST")
         SPC_HEADH1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.LBL_EXPORT = QtWidgets.QLabel(self.WGT_CENTRAL); self.LBL_EXPORT.setObjectName("LBL_EXPORT")
         self.BTN_POWERPOINT = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_POWERPOINT.setObjectName("BTN_POWERPOINT")
@@ -1639,6 +1657,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.LYT_HEAD.addWidget(self.PIX_HEADER, 1, 0, 1, 7)
         self.LYT_HEAD.addItem(SPC_TITLEV2, 2, 0, 1, 3)
         self.LYT_HEAD.addWidget(self.BTN_SETTINGS, 3, 0, 1, 1)
+        self.LYT_HEAD.addWidget(self.BTN_SAVELIST, 3, 1, 1, 1)
         self.LYT_HEAD.addItem(SPC_HEADH1, 3, 3, 1, 1)
         self.LYT_HEAD.addWidget(self.LBL_EXPORT, 3, 4, 1, 1)
         self.LYT_HEAD.addWidget(self.BTN_POWERPOINT, 3, 5, 1, 1)
@@ -1801,6 +1820,11 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
         self.LNE_SUBTITLE.textChanged.connect(lambda: UIB.updatePackage())
 
 
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.closeEvent()
+
+
     def closeEvent(self, event=None):
         """
         Close event for Settings window.
@@ -1822,7 +1846,7 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
                 self.saveChanges()
             else:
                 PKG.restart()
-                return
+                self.hide()
         else:
             self.saveChanges()
     
