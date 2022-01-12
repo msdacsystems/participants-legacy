@@ -19,20 +19,20 @@ Spacing Gap Formats:
     • Comments - 1 line
 
 Disclaimer:
-    This is an experimental program and we are aware that this software is slow
+    This is an experimental program and we are aware of the slow performance
     due to Python's nature of interpreting code at runtime which affects speed.
     We are planning to switch to a better codebase later on though.
 
 
 This program is part of MSDAC System's collection of softwares
-Made with Qt
+
+Made with Qt, KV
 (c) 2021-present Ken Verdadero, Reynald Ycong
 """
 
 
 ## Import Modules
 import sys
-
 
 try:
     import os, psutil, winreg, time, datetime, json, shutil, gc
@@ -81,6 +81,7 @@ class System(object):
 
         ## Resources
         self.RES_LOGO =             './res/images/logo.png'                                                                 ## Resource SDA Logo Image
+        self.RES_APP_ICON =         './res/images/app_icon.png'                                                             ## Resource Participants Main Icon
         self.RES_HEADERLOGO =       './res/images/header.png'                                                               ## Resource Main Header Image
         self.RES_DEFAULT_BG =       'res/images/defBG.png'                                                                  ## Resource Default Background Image
         self.RES_FONT_EXTS =        ['Cameliya.otf', 'HarrietTextBold.otf', 'HarrietTextBoldItalic.otf']                    ## Resource External Fonts for PowerPoint
@@ -240,7 +241,7 @@ class Data(object):
                     return DATA
         
 
-    def dump(self, data=None, indent=None, sort_keys=False):
+    def dump(self, data=None, indent=4, sort_keys=True):
         """
         Saves the passed data to system's data file.
         Uses indention of 4 and sorted keys by default.
@@ -478,7 +479,7 @@ class Stylesheet(object):
         Values depends on what is the current theme.
         """
         # self.getThemes()
-        RADIUS = "6px" ## Default: 9px
+        RADIUS = "7px" ## Default: 9px
         RADIUS_SML = "4px" ## Default: 5px
         PADDING = "5px"
 
@@ -616,6 +617,22 @@ class Stylesheet(object):
 
                 QPushButton::disabled#BTN_REMS, QPushButton::disabled#BTN_DISCARD {{
                     image: url('./res/icons/xmark_disabled.png');
+                }}
+
+
+                /* Remove Button LOCKED */ 
+                QPushButton#BTN_REMS_LOCKED {{
+                    background-color: none;
+                    border: none;
+                    image: url('./res/icons/locked.png');
+                }}
+
+                QPushButton::hover#BTN_REMS_LOCKED {{
+                    image: url('./res/icons/unlock.png');
+                }}
+
+                QPushButton::disabled#BTN_REMS_LOCKED {{
+                    image: url('./res/icons/locked_disabled.png');
                 }}
 
 
@@ -999,23 +1016,37 @@ class Core(object):
 class Fields(object):
     """
     Handles all field-related events:
-        - Add/Remove field(s)
+        - Insert/Duplicate field(s)
+        - Remove field(s)
+        - Lock/Unlock fields
         - Button refreshers
+        - Auto-add items for combo box after editing
         - Field data access
         - Export field to plain text
         - Export field to Powerpoint
     
     Field - A group of widgets linked to one participant.
-            It contains role, name, and the + & x buttons
+            It contains role and name combo boxes and the operator buttons (active, insert/duplicate, remove/lock)
     """
     def __init__(self):
         """
         Constructor
         """
+        self.LOADING = True
         self.CBX_RLS, self.CBX_NMS, self.BTN_REMS, self.BTN_INSS, self.BTN_ATVS = [], [], [], [], []
         self.FIELDS = 0
         self.FIELDS_MAX = 20
         self.PREV_ACTIVE = None
+        self.PREV_CBX = (0,0,0,0)
+        self.MAX_VISIBLE_ITEMS = 13
+        self.SEPARATOR = "—————————"
+
+        ## Tooltip Values
+        self.TTIP_BTN_ATVS = "Set as active"
+        self.TTIP_BTN_ATVS_SELECTED = "Unset from being active"
+        self.TTIP_BTN_INSS = "Add new field below or right click to duplicate"
+        self.TTIP_BTN_REMS = "Remove the field or right click to lock this field"
+        self.TTIP_BTN_REMS_LOCKED = "Right click to unlock"
 
 
     def setup(self):
@@ -1028,8 +1059,10 @@ class Fields(object):
             PDB.generateDefault()
             LENGTH = 1
         self.addFields(LENGTH)
-        self.updateItems()
+        self.fillupItems()
+        self.refreshItems()
         self.refreshStates()
+        self.LOADING = False
 
 
     def refreshStates(self):
@@ -1040,46 +1073,119 @@ class Fields(object):
         This method helps the class handler to reconnect all connections
         of every present button after recent changes
         """
-        ## Reconnect Buttons
-        for i in range(len(self.BTN_REMS)):                                                 ## Loops through every single button object based on BTN_REMS or BTN_INSS
+        ## Reconnect Signals
+        for i in range(len(self.BTN_REMS)):                                                             ## Loops through every single button object based on BTN_REMS or BTN_INSS
             try:
+                self.CBX_RLS[i].lineEdit().editingFinished.disconnect()
+                self.CBX_NMS[i].lineEdit().editingFinished.disconnect()
+                self.CBX_RLS[i].lineEdit().textChanged.disconnect()
+                self.CBX_NMS[i].lineEdit().textChanged.disconnect()
                 self.BTN_ATVS[i].clicked.disconnect()
-                self.BTN_INSS[i].clicked.disconnect()
-                self.BTN_REMS[i].clicked.disconnect()
-            except Exception:                                                               ## Throws exception when the buttons aren't connected yet which is not valid in the disconnect method
+            except Exception:                                                                           ## Throws exception when the buttons aren't connected yet which is not valid in the disconnect method
                 pass
-            finally:                                                                        ## Always connect the Add and Remove button to its main method
+            finally:                                                                                    ## Always connect the Add and Remove button to its main method
+                self.CBX_RLS[i].lineEdit().editingFinished.connect(lambda: self.refreshItems())
+                self.CBX_NMS[i].lineEdit().editingFinished.connect(lambda: self.refreshItems())
+                self.CBX_RLS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('RLS'))
+                self.CBX_NMS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('NMS'))
                 self.BTN_ATVS[i].clicked.connect(lambda: self.setActiveField())
-                self.BTN_INSS[i].clicked.connect(lambda: self.redirectFieldInsertion())
-                self.BTN_REMS[i].clicked.connect(lambda: self.removeField())
+                self.BTN_INSS[i].mouseReleaseEvent = lambda event: self.mouseReleased('INSS', event)
+                self.BTN_REMS[i].mouseReleaseEvent = lambda event: self.mouseReleased('REMS', event)
         
         ## Prevent Overflow
         for btn in self.BTN_INSS:
             if self.FIELDS >= self.FIELDS_MAX:
-                btn.setEnabled(False)               ## Sets the button to whether Enabled or Disabled depending on how many fields are active
+                btn.setEnabled(False)                                                                   ## Sets the button to whether Enabled or Disabled depending on how many fields are active
                 btn.setToolTip("")
             else:
                 btn.setEnabled(True)
-                btn.setToolTip("Add new field below")
+                btn.setToolTip(self.TTIP_BTN_INSS)
 
         ## Prevent Depletion
         try:
-            self.BTN_REMS[0].setEnabled(False if self.FIELDS <= 1 else True)                ## Disables the last field's remove button
+            self.BTN_REMS[0].setEnabled(False if self.FIELDS <= 1 else True)                            ## Disables the last field's remove button
         except IndexError:
             pass
         
         UIA.updateWindowTitle()
-    
 
-    def redirectFieldInsertion(self):
+
+    def refreshItems(self):
+        """
+        Overrides the LineEdit's editingFinished event
+        Adds the edited text to an item to every combo boxes if eligible
+        """
+        PROC = (self.CBX_RLS, RLS), (self.CBX_NMS, NMS)                                 ## Procedure Variable (Role Objects, Role List) & (Name Objects, Name List)
+        s = 0                                                                           ## Step
+
+        while True:
+            ITEMS = [c.currentText() for c in PROC[s][0]]                               ## Retrieve all current items displayed
+            HOLD_CBX = self.PREV_CBX
+
+            for i, c in enumerate(PROC[s][0]):                                          ## Clear and fill up all CBX objects with items
+                c.clear()
+                c.addItems(ITEMS)
+                c.setCurrentIndex(i)
+                ## FIX THIS (Blank spaces)
+                if c.currentText() == '':                                               ## Prevent including the blank item in combo box by resetting the index to none (-1)
+                    c.setCurrentIndex(-1)
+                    c.removeItem(i)
+            
+            MERGE = [item for item in PROC[s][1] if item not in ITEMS]                  ## Merge with excess names from pool
+            if len(MERGE):
+                for i, c in enumerate(PROC[s][0]):
+                    c.insertSeparator(c.count()-1)  ## <-- Not working for some reason
+                    c.addItem(self.SEPARATOR)
+                    c.addItems(MERGE)
+
+            ## Scan for identicals
+            # for i, c in enumerate(PROC[s][0]):
+            #     IDENTICAL = [c for c in i, c in enumerate(PROC[s][0][0]) if c.itemText(i) == HOLD_CBX[3]]
+
+            # p(IDENTICAL)
+            # if len(IDENTICAL):
+            #     for i, identical in enumerate(IDENTICAL):
+            #         p(PROC[s][0][identical].currentText())
+            #         if i != 0:
+            #             p(f'Removing {identical}')
+            #             PROC[s][0][identical].setCurrentIndex(IDENTICAL[0])
+            #             c.removeItem(i)
+
+            if s > 0: break
+            else: s += 1
+
+
+    def fillupItems(self):
+        """
+        Syncs the entries for every field.
+
+        This method also removes blank string retrieved from a pool.
+        """
+        m = time.time()
+        R_ITEMS, N_ITEMS = [], []
+
+        ## Sets the index to its exact position
+        for i,(r,n) in enumerate(zip(self.CBX_RLS, self.CBX_NMS)):
+            r.setCurrentIndex(i)
+            n.setCurrentIndex(i)
+
+            if r.currentText() == '': r.setCurrentIndex(-1)                                 ## Rebind to none
+            if n.currentText() == '': n.setCurrentIndex(-1)
+
+
+    def redirectFieldInsertion(self, duplicate=False):
         """
         Redirects function to UIA's Field Insertion function.
         Triggers from the Add button via PyQt signal 
         """
         for i, btn in enumerate(self.BTN_INSS):
-            if btn.hasFocus():
-                self.insertField(i)
-                break
+            if not btn.hasFocus(): continue
+            self.insertField(i)
+            self.refreshItems()
+            if duplicate:
+                self.CBX_RLS[i+1].setCurrentIndex(self.CBX_RLS[i].findText(self.CBX_RLS[i].currentText()))
+                self.CBX_NMS[i+1].setCurrentIndex(self.CBX_NMS[i].findText(self.CBX_NMS[i].currentText()))
+            break      
 
 
     def setActiveField(self):
@@ -1088,33 +1194,29 @@ class Fields(object):
         to be read by a Text Source from OBS Studio
         """
         for i, btn in enumerate(self.BTN_ATVS):
-            if btn.hasFocus():
-                if btn.objectName() == 'BTN_ATVS_SELECTED':
-                    ## Unset the field from being active
-                    EXP.fromActiveField(i, True)
-                    btn.setObjectName('BTN_ATVS')
-                else:
-                    ## Before setting the triggered button to active, determine the previous
-                    ## index to unset from being active and return into a normal state.
-                    if self.PREV_ACTIVE is not None:
-                        POINTER = self.PREV_ACTIVE
-                        try:
-                            self.BTN_ATVS[POINTER]
-                        except IndexError:
-                            POINTER = len(self.BTN_ATVS)-1
-                        finally:
-                            self.BTN_ATVS[POINTER].setObjectName('BTN_ATVS')
-                            self.BTN_ATVS[POINTER].setToolTip('Set as active')
-                            self.BTN_ATVS[POINTER].setStyleSheet(QSS.getStylesheet())
+            if not btn.hasFocus(): continue
+            if btn.objectName() == 'BTN_ATVS_SELECTED':                                             ## Unset the field from being active
+                EXP.fromActiveField(i, True)
+                btn.setObjectName('BTN_ATVS')
+            else:                                                                                   ## Before setting the triggered button to active, determine the previous
+                if self.PREV_ACTIVE is not None:                                                    ## index to unset from being active and return into a normal state.
+                    POINTER = self.PREV_ACTIVE
+                    try:
+                        self.BTN_ATVS[POINTER]
+                    except IndexError:
+                        POINTER = len(self.BTN_ATVS)-1
+                    finally:
+                        self.BTN_ATVS[POINTER].setObjectName('BTN_ATVS')
+                        self.BTN_ATVS[POINTER].setToolTip(self.TTIP_BTN_ATVS)
+                        self.BTN_ATVS[POINTER].setStyleSheet(QSS.getStylesheet())
+                
+                EXP.fromActiveField(i)                                                              ## Set the focused button to be active and export the file
+                btn.setObjectName('BTN_ATVS_SELECTED')
+                btn.setToolTip(self.TTIP_BTN_ATVS_SELECTED)
+                self.PREV_ACTIVE = i
 
-                    ## Set the focused button to be active and export the file
-                    EXP.fromActiveField(i)
-                    btn.setObjectName('BTN_ATVS_SELECTED')
-                    btn.setToolTip('Unset from being active')
-                    self.PREV_ACTIVE = i
-
-                btn.setStyleSheet(QSS.getStylesheet())
-                break
+            btn.setStyleSheet(QSS.getStylesheet())
+            break
 
 
     def insertField(self, pos:int=-1):
@@ -1165,43 +1267,37 @@ class Fields(object):
         self.FIELDS = FDS+1
 
         ## Fills the placeholder with objects (for Role, Name, Add, and Clear/Remove button) 
-        self.CBX_RLS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL)
-        self.CBX_RLS[pos].setObjectName(f"CBX_RLS")
+        self.CBX_RLS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL); self.CBX_RLS[pos].setObjectName(f"CBX_RLS")
         self.CBX_RLS[pos].view().window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.CBX_RLS[pos].view().window().setAttribute(Qt.WA_TranslucentBackground)
-        self.CBX_RLS[pos].setMinimumWidth(140)
-        self.CBX_RLS[pos].setMaximumWidth(200)
+        self.CBX_RLS[pos].setMinimumWidth(140); self.CBX_RLS[pos].setMaximumWidth(200)
         self.CBX_RLS[pos].setEditable(True)
         self.CBX_RLS[pos].addItems(RLS)
         self.CBX_RLS[pos].setCurrentText('')
+        self.CBX_RLS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
+        # for i in range(self.CBX_RLS[pos].count()): self.CBX_RLS[pos].setItemIcon(i, QtGui.QIcon('res/icons/right_arrow.png'))
 
-        self.CBX_NMS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL)
-        self.CBX_NMS[pos].setObjectName(f"CBX_NMS")
+        self.CBX_NMS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL); self.CBX_NMS[pos].setObjectName(f"CBX_NMS")
         self.CBX_NMS[pos].view().window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.CBX_NMS[pos].view().window().setAttribute(Qt.WA_TranslucentBackground)
-        self.CBX_NMS[pos].setMinimumWidth(140)
-        self.CBX_NMS[pos].setMaximumWidth(200)
+        self.CBX_NMS[pos].setMinimumWidth(140); self.CBX_NMS[pos].setMaximumWidth(200)
         self.CBX_NMS[pos].setEditable(True)
         self.CBX_NMS[pos].addItems(NMS)
         self.CBX_NMS[pos].setCurrentText('')
+        self.CBX_NMS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
+        # for i in range(self.CBX_NMS[pos].count()): self.CBX_NMS[pos].setItemIcon(i, QtGui.QIcon('res/icons/user.png'))
 
-        self.BTN_ATVS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
-        self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
-        self.BTN_ATVS[pos].setMaximumWidth(25)
-        self.BTN_ATVS[pos].setMinimumHeight(30)
-        self.BTN_ATVS[pos].setToolTip("Set as active text")
+        self.BTN_ATVS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
+        self.BTN_ATVS[pos].setMaximumWidth(25);        self.BTN_ATVS[pos].setMinimumHeight(30)
+        self.BTN_ATVS[pos].setToolTip(self.TTIP_BTN_ATVS)
 
-        self.BTN_INSS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
-        self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
-        self.BTN_INSS[pos].setMaximumWidth(26)
-        self.BTN_INSS[pos].setMinimumHeight(30)
-        self.BTN_INSS[pos].setToolTip("Add new field below")
+        self.BTN_INSS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
+        self.BTN_INSS[pos].setMaximumWidth(26); self.BTN_INSS[pos].setMinimumHeight(30)
+        self.BTN_INSS[pos].setToolTip(self.TTIP_BTN_INSS)
 
-        self.BTN_REMS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL)
-        self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
-        self.BTN_REMS[pos].setMaximumWidth(25)
-        self.BTN_REMS[pos].setMinimumHeight(30)
-        self.BTN_REMS[pos].setToolTip("Remove this field")
+        self.BTN_REMS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
+        self.BTN_REMS[pos].setMaximumWidth(25); self.BTN_REMS[pos].setMinimumHeight(30)
+        self.BTN_REMS[pos].setToolTip(self.TTIP_BTN_REMS)
 
         ## Finally adds those widgets into vertical layouts
         UIA.LYT_ROLES.insertWidget(pos, self.CBX_RLS[pos])
@@ -1226,87 +1322,116 @@ class Fields(object):
         the layout and deleting its widgets from memory.
         """
         for i, btn in enumerate(self.BTN_REMS):
-            if btn.hasFocus():
-                UIA.LYT_ROLES.removeWidget(self.CBX_RLS[i])
-                UIA.LYT_NAMES.removeWidget(self.CBX_NMS[i])
-                UIA.LYT_INSRT.removeWidget(self.BTN_ATVS[i])
-                UIA.LYT_INSRT.removeWidget(self.BTN_INSS[i])
-                UIA.LYT_CLEAR.removeWidget(self.BTN_REMS[i])
+            if not btn.hasFocus(): continue
+            if btn.objectName() != "BTN_REMS": return
 
-                del self.CBX_RLS[i]
-                del self.CBX_NMS[i]
-                del self.BTN_REMS[i]
-                del self.BTN_INSS[i]
-                del self.BTN_ATVS[i]
-                self.FIELDS -= 1
-                self.refreshStates()
-                gc.collect()
+            UIA.LYT_ROLES.removeWidget(self.CBX_RLS[i])
+            UIA.LYT_NAMES.removeWidget(self.CBX_NMS[i])
+            UIA.LYT_INSRT.removeWidget(self.BTN_ATVS[i])
+            UIA.LYT_INSRT.removeWidget(self.BTN_INSS[i])
+            UIA.LYT_CLEAR.removeWidget(self.BTN_REMS[i])
 
-                ## Reset window to shortest possible to remove spaces left by the field.
-                UIA.resize(UIA.size().width(), 0)   
-                break
+            del self.CBX_RLS[i]
+            del self.CBX_NMS[i]
+            del self.BTN_REMS[i]
+            del self.BTN_INSS[i]
+            del self.BTN_ATVS[i]
+            self.FIELDS -= 1
+            self.refreshStates()
+            gc.collect()
+
+            ## Reset window to shortest possible to remove spaces left by the field.
+            UIA.resize(UIA.size().width(), 0)   
+            break
     
 
-    def getFieldData(self):
+    def lockUnlockField(self):
+        """
+        Handles lock and unlock mechanism of the field selected
+        """
+        for i, btn in enumerate(self.BTN_REMS):
+            if not btn.hasFocus(): continue
+            if btn.objectName() == "BTN_REMS":                                          ## Lock
+                btn.setObjectName("BTN_REMS_LOCKED")
+                btn.setStyleSheet(QSS.getStylesheet())
+                btn.setToolTip(self.TTIP_BTN_REMS_LOCKED)
+                self.CBX_RLS[i].setEnabled(False)
+                self.CBX_NMS[i].setEnabled(False)
+            else:                                                                       ## Unlock
+                btn.setObjectName("BTN_REMS")
+                btn.setStyleSheet(QSS.getStylesheet())
+                btn.setToolTip(self.TTIP_BTN_REMS)
+                self.CBX_RLS[i].setEnabled(True)
+                self.CBX_NMS[i].setEnabled(True)
+
+
+    def mouseReleased(self, button, event):
+        """
+        Overrides default mouse release events for BTN_INSS and BTN_REMS
+        Handles mouse-related events from field buttons such as:
+        - Insert
+        - Remove
+        """
+
+        ## Insert Button
+        if button == 'INSS':
+            if event.button() == Qt.LeftButton:
+                self.redirectFieldInsertion()
+            elif event.button() == Qt.RightButton:
+                self.redirectFieldInsertion(True)
+
+        ## Remove Button
+        elif button == 'REMS':
+            if event.button() == Qt.LeftButton:
+                self.removeField()
+            elif event.button() == Qt.RightButton:
+                self.lockUnlockField()
+
+
+    def recordCbx(self, cbx):
+        """
+        Overrides TextChanged event of combo boxes 
+
+        Records the CBX object to help identifying the last
+        combo box user used for editing fields
+        
+        PREV_CBX = (Category, Index Pos, Current Index Pos, Current Text)
+        """
+        if self.LOADING: return
+
+        if cbx == 'RLS':
+            for i, cbx in enumerate(self.CBX_RLS):
+                if not cbx.hasFocus(): continue
+                if cbx.currentText() == self.SEPARATOR:                                                             ## Helps preventing to display the separator
+                    cbx.setCurrentIndex(cbx.currentIndex()+ (1 if self.PREV_CBX[2] < cbx.currentIndex() else -1))
+                    return
+                self.PREV_CBX = (0, i, cbx.currentIndex(), cbx.itemText(cbx.currentIndex()))
+                break
+                
+        elif cbx == 'NMS':
+            for i, cbx in enumerate(self.CBX_NMS):
+                if not cbx.hasFocus(): continue
+                if cbx.currentText() == self.SEPARATOR:
+                    cbx.setCurrentIndex(cbx.currentIndex()+ (1 if self.PREV_CBX[2] < cbx.currentIndex() else -1))
+                    return
+                self.PREV_CBX = (1, i, cbx.currentIndex(), cbx.itemText(cbx.currentIndex()))
+                break
+
+
+    def getFieldData(self, merge=False):
         """
         Returns 2 lists, and a dictionary of all fields' data
         Used for when exporting to a file (Powerpoint, plain text)
         """
-        RLS = [role.currentText() for role in self.CBX_RLS]
-        NMS = [name.currentText() for name in self.CBX_NMS]
-        DCT = {i:[k,v] for i, (k,v) in enumerate(zip(RLS, NMS))}
+        ROLES = [role.currentText() for role in self.CBX_RLS]
+        NAMES = [name.currentText() for name in self.CBX_NMS]
+        DICT = {i:[k,v] for i, (k,v) in enumerate(zip(ROLES, NAMES))}
+
+        if merge:
+            ROLES += [i for i in RLS if i not in ROLES]
+            NAMES += [i for i in NMS if i not in NAMES]
         
-        return RLS, NMS, DCT
-
-
-    def updateItems(self):
-        """
-        Syncs the entries for every field.
-
-        This method also removes blank string retrieved from a pool.
-        """
-        m = time.time()
-        R_ITEMS, N_ITEMS = [], []
-
-        ## Sets the index to its exact position
-        for i,(r,n) in enumerate(zip(self.CBX_RLS, self.CBX_NMS)):
-            r.setCurrentIndex(i)
-            n.setCurrentIndex(i)
-
-            if r.currentText() == '': r.setCurrentIndex(-1)
-            if n.currentText() == '': n.setCurrentIndex(-1)
-
-        ## Removes blank item in Combo Box by looping through several times
-        for i in range(3):
-            for r in self.CBX_RLS:
-                for i in range(r.count()):
-                    R_ITEMS.append(r.itemData(i,0))
-                    if r.itemData(i,0)== '':
-                        r.removeItem(i)
-
-            for r in self.CBX_NMS:
-                for i in range(r.count()):
-                    N_ITEMS.append(n.itemData(i,0))
-                    if r.itemData(i,0)== '':
-                        r.removeItem(i)
-
-        ## Under Construction
-        ## 
-        ## - Create a algorithm that will filter out all duplicate items in every combo boxes
-        ##
-
-        # for r in self.CBX_RLS:
-        #     for i in range(r.count()):
-        # for r in self.CBX_RLS:
-        #     r.clear()
-        #     r.addItems(list(set(R_ITEMS)))
-        # p()
-        # R_FILTERED = list(set(R_ITEMS))
-        # # p(R_ITEMS)
-        # p(list(set(R_ITEMS) - set(R_FILTERED)))
-        # # p([i for i in R_ITEMS if i not in list(set(R_ITEMS))])
-        # p(list(set(N_ITEMS)))
-        # p(time.time()-m)
+        return ROLES, NAMES, DICT
 
 
 
@@ -1352,6 +1477,7 @@ class Export(object):
                 LOG.error(e)
             
             ## Save to JSON
+            RLS, NMS, DCT = FLD.getFieldData(True)
             DCFG['POOL'].update({"ROLES": RLS})
             DCFG['POOL'].update({"NAMES": NMS})
             DCFG['CONFIG'].update({"DIR_EXPORT_RECENT": DIR_TGT})
@@ -1359,7 +1485,7 @@ class Export(object):
             PDB.dump()
             LOG.info("File successfully saved.")
             ## 
-            ## Add code here that would update the combo boxes connected to FDS.updateItems()
+            ## Add code here that would update the combo boxes connected to FDS.fillupItems()
             ## 
 
 
@@ -1582,7 +1708,7 @@ class Export(object):
         except Exception as e:
             LOG.error(f"{e}")
         else:
-            RLS, NMS, DCT = FLD.getFieldData()
+            RLS, NMS, DCT = FLD.getFieldData(True)
             DCFG['POOL'].update({"ROLES": RLS})
             DCFG['POOL'].update({"NAMES": NMS})
             PDB.dump()
@@ -1610,8 +1736,9 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         ## Window
         self.setObjectName("WIN_PARTICIPANTS")
         self.resize(0, 0)
-        self.setMaximumWidth(500)
-        self.setWindowIcon(QtGui.QIcon(SYS.RES_LOGO))
+        self.setMaximumWidth(520)
+        self.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
 
         ## Layouts
         self.WGT_CENTRAL = QtWidgets.QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
@@ -1654,7 +1781,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
 
         ## Layering
         ## Head
-        self.LYT_HEAD.addWidget(self.PIX_HEADER, 1, 0, 1, 7)
+        self.LYT_HEAD.addWidget(self.PIX_HEADER, 1, 0, 1, 8)
         self.LYT_HEAD.addItem(SPC_TITLEV2, 2, 0, 1, 3)
         self.LYT_HEAD.addWidget(self.BTN_SETTINGS, 3, 0, 1, 1)
         self.LYT_HEAD.addWidget(self.BTN_SAVELIST, 3, 1, 1, 1)
@@ -1689,8 +1816,8 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
 
         ## Initialization
         self.setupDisplay()
-        FLD.setup()
         self.setupConnections()
+        FLD.setup()
     
 
     def setupDisplay(self):
@@ -1746,8 +1873,8 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
         ## Window
         self.setObjectName("WIN_SETTINGS")
         self.setFixedSize(QtCore.QSize(380, 320))
-        self.setWindowIcon(QtGui.QIcon(SYS.RES_LOGO))
-
+        self.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
+        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
 
         self.GRID_MAIN = QtWidgets.QGridLayout(self); self.GRID_MAIN.setObjectName("GRID_MAIN")
         self.GRID_BODY = QtWidgets.QGridLayout(); self.GRID_BODY.setObjectName("GRID_BODY")
@@ -1833,13 +1960,14 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
         if SYS.GLOBAL_STATE == 3: return
         if self.CHANGED:
             MSG_BOX = QtWidgets.QMessageBox()
+            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
             MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
+            MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
             MSG_BOX.setText("You have unsaved changes\nDo you want to save your preferences?")
             MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowFlags(Qt.Drawer | Qt.WindowStaysOnTopHint)
-            MSG_BOX.setStyleSheet(QSS.getStylesheet())
-            MSG_BOX.setStyleSheet('min-width: 250px; min-height: 40px;')
+            MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
             
             RET = MSG_BOX.exec_()
             if RET == QtWidgets.QMessageBox.Yes:
@@ -1864,12 +1992,25 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
     def enterWindow(self):
         """
         Triggers after UIA's settings button was clicked
+
+        Also handles dynamic position of Settings depending on UIA's pos
         """
         self.ENTERING = True
+
+        ## Spawn settings at center of UIA
+        if self.isHidden():
+            WINDOW = (UIA.frameGeometry().width()-self.frameGeometry().width(),
+                    UIA.frameGeometry().height()-self.frameGeometry().height())
+            self.move(UIA.pos().x()+int(WINDOW[0]/2), UIA.pos().y()+int(WINDOW[1]/1.85))
+        
+        ## Restore window / Show
+        self.show()
+        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        self.activateWindow()
+
+        ## Re-initialize variable
         self.LNE_TITLE.setText(PKG.TXT_TITLE)
         self.LNE_SUBTITLE.setText(PKG.TXT_SUBTITLE)
-        self.show()
-        self.raise_()                                   ## Bring to front when clicked again
         self.ENTERING = False
         self.CHANGED = False
     
@@ -1931,7 +2072,7 @@ if __name__ == '__main__':
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
-    SW = KSoftware("Participants", "1.0.3", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Alpha")
+    SW = KSoftware("Participants", "1.0.4", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Release")
     LOG = KLog(System().DIR_LOG, __file__, SW.LOG_NAME_DATE(), SW.PY_NAME, SW.AUTHOR, cont=True, tms=True, delete_existing=True, tmsformat="%H:%M:%S.%f %m/%d/%y")
 
     SYS = System()
