@@ -1708,9 +1708,37 @@ class Export(object):
             PARA_NMS.alignment = PP_ALIGN.LEFT
             PARA_NMS.font.name = PKG.FONT_CONTENT
         
+
+        ## Scan for new items that are currently not in pool
+        ##
+        ## NOTE: Needed to change the structure of data.json.
+        ##       the NAMES pool will be divided into 2 (USED & XTRA)
+        ##       USED - Names that are displayed in the fields. Same length with ROLES
+        ##       XTRA - Unused names that are in the pool
+
+        # NEW_NAMES = [name for name in [c.currentText() for c in FLD.CBX_NMS] if name not in DCFG['POOL']['NAMES']]
+        # if len(NEW_NAMES):
+        #     MSG_BOX = QtWidgets.QMessageBox()
+        #     MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
+        #     MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        #     MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
+        #     MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
+        #     MSG_BOX.setText("There are new participants recorded\nDo you want to add them all to your list?")
+        #     MSG_BOX.setDetailedText("\n".join(map(str, NEW_NAMES)))
+        #     MSG_BOX.setWindowTitle(SW.NAME)
+        #     MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+        #     MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
+        #     RET = MSG_BOX.exec_()
+
+        #     if RET == QtWidgets.QMessageBox.Yes:
+        #         p('Saved')
+        #     else:
+        #         p('Unsaved')
+        #         return
+
         START = time.time()
         LOG.info("Generating Powerpoint")
-        doubleColumns(self) if FLD.FIELDS > FLD.FIELDS_MAX/1.15 else singleColumn(self)
+        doubleColumns(self) if FLD.FIELDS > FLD.FIELDS_MAX/1.15 else singleColumn(self)            
 
         try:
             self.PRS.save(SYS.FILE_PPT_EXPORTED)
@@ -1718,13 +1746,14 @@ class Export(object):
         except PermissionError as e:
             LOG.warn("PermissionError: The file is still open or is already running. Close the file first and try again.")
             MSG_BOX = QtWidgets.QMessageBox()
+            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
             MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.Ok)
             MSG_BOX.setIcon(QtWidgets.QMessageBox.Warning)
             MSG_BOX.setText("The file is still open or is already running.\nIf you have changes, close the file first and try again.")
             MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowFlags(Qt.Drawer | Qt.WindowStaysOnTopHint)
-            MSG_BOX.setStyleSheet(QSS.getStylesheet())
-            MSG_BOX.setStyleSheet('min-width: 280px; min-height: 35px;')
+            MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
             MSG_BOX.exec_()
         except Exception as e:
             LOG.error(f"{e}")
