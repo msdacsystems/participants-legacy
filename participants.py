@@ -922,7 +922,7 @@ class Package(object):
     def setupDefaultVariables(self):
         """
         Initiates all default variables before loading the user-customized values
-        Works as a placeholder incase something went wrong from user
+        Works as a placeholder incase something went wrong from user data (JSON)
         """
         self.DEF_DIR_EXPORT_RECENT = SW.DIR_CWD
         self.DIR_EXPORT_RECENT = SW.DIR_CWD
@@ -1020,10 +1020,8 @@ class Fields(object):
         - Remove field(s)
         - Lock/Unlock fields
         - Button refreshers
-        - Auto-add items for combo box after editing
+        - Auto-add items to combo box after editing
         - Field data access
-        - Export field to plain text
-        - Export field to Powerpoint
     
     Field - A group of widgets linked to one participant.
             It contains role and name combo boxes and the operator buttons (active, insert/duplicate, remove/lock)
@@ -1080,8 +1078,6 @@ class Fields(object):
                 self.CBX_NMS[i].lineEdit().editingFinished.disconnect()
                 self.CBX_RLS[i].lineEdit().textChanged.disconnect()
                 self.CBX_NMS[i].lineEdit().textChanged.disconnect()
-                self.CBX_RLS[i].view().pressed.disconnect() ## FIX THIS
-                self.CBX_NMS[i].view().pressed.disconnect()
                 self.BTN_ATVS[i].clicked.disconnect()
             except Exception:                                                                           ## Throws exception when the buttons aren't connected yet which is not valid in the disconnect method
                 pass
@@ -1090,8 +1086,6 @@ class Fields(object):
                 self.CBX_NMS[i].lineEdit().editingFinished.connect(lambda: self.refreshItems())
                 self.CBX_RLS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('RLS'))
                 self.CBX_NMS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('NMS'))
-                self.CBX_RLS[i].view().pressed.connect(lambda: self.popupOpened())
-                self.CBX_NMS[i].view().pressed.connect(lambda: self.popupOpened())
                 self.BTN_ATVS[i].clicked.connect(lambda: self.setActiveField())
                 self.BTN_INSS[i].mouseReleaseEvent = lambda event: self.mouseReleased('INSS', event)
                 self.BTN_REMS[i].mouseReleaseEvent = lambda event: self.mouseReleased('REMS', event)
@@ -1120,14 +1114,14 @@ class Fields(object):
         Adds the edited text to an item to every combo boxes if eligible
         """
         m = time.time()
-        PROC = (self.CBX_RLS, RLS), (self.CBX_NMS, NMS)                                 ## Procedure Variable (Role Objects, Role List) & (Name Objects, Name List)
+        PRCD = (self.CBX_RLS, RLS), (self.CBX_NMS, NMS)                                 ## Procedure Variable (Role Objects, Role List) & (Name Objects, Name List)
         s = 0                                                                           ## Step
 
         while True:
-            ITEMS = [c.currentText() for c in PROC[s][0]]                               ## Retrieve all current items displayed
-            HOLD_CBX = self.PREV_CBX
+            ITEMS = [c.currentText() for c in PRCD[s][0]]                               ## Retrieve all current items displayed
+            HOLD_CBX = self.PREV_CBX                                                    ## Used for holding values for previous recorded CBX
 
-            for i, c in enumerate(PROC[s][0]):                                          ## Clear and fill up all CBX objects with items
+            for i, c in enumerate(PRCD[s][0]):                                          ## Clear and fill up all CBX objects with items
                 c.clear()
                 c.addItems(ITEMS)
                 c.setCurrentIndex(i)
@@ -1136,17 +1130,17 @@ class Fields(object):
                     c.setCurrentIndex(-1)
                     c.removeItem(i)
             
-            MERGE = [item for item in PROC[s][1] if item not in ITEMS]                  ## Merge with excess names from pool
+            MERGE = [item for item in PRCD[s][1] if item not in ITEMS]                  ## Merge with excess names from pool
             if len(MERGE):
-                for i, c in enumerate(PROC[s][0]):
+                for i, c in enumerate(PRCD[s][0]):
                     # c.insertSeparator(c.count()-1)  ## <-- Not working for some reason
                     c.addItem(self.SEPARATOR)
                     c.addItems(MERGE)
 
             # ## Scan for identicals
             # PARTIAL = ITEMS + MERGE
-            # IDENTICAL = [i for i in range(len(PROC[s][0])) if PROC[s][0][i].itemText(i) == HOLD_CBX[3]]
-            # IDENTICAL_TEXT = list(set([PROC[s][0][i].itemText(i) for i in range(len(PROC[s][0])) if PROC[s][0][i].itemText(i) == HOLD_CBX[3]]))
+            # IDENTICAL = [i for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HOLD_CBX[3]]
+            # IDENTICAL_TEXT = list(set([PRCD[s][0][i].itemText(i) for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HOLD_CBX[3]]))
 
 
             # if HOLD_CBX[3] != 0:
@@ -1154,7 +1148,7 @@ class Fields(object):
             #     p(f"IDENTICAL: {IDENTICAL[1:]}")
             #     p(f"IDENTICAL_TEXT: {IDENTICAL_TEXT[1:]}")
             #     duplicated = False                                                          ## Indicator; 
-            #     for i, c in enumerate(PROC[s][0]):                                          ## Clear and fill up all CBX objects with items
+            #     for i, c in enumerate(PRCD[s][0]):                                          ## Clear and fill up all CBX objects with items
             #         c.clear()
             #         placed = False                                                          ## Indicator; when set to False, the duplicated text is not yet added.
 
@@ -1185,12 +1179,6 @@ class Fields(object):
             if s > 0: break
             else: s += 1
 
-        showLatency(m)
-    
-
-    def popupOpened(self):
-        p('Openeeeedd!!')
-        
 
     def fillupItems(self):
         """
@@ -1890,7 +1878,8 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
 
 class QWGT_SETTINGS(QtWidgets.QWidget):
     """
-    Settings window
+    Settings window 
+    Mostly for UI-related functions only.
 
     Alias UIB (User Interface B / Settings)
     """
@@ -2098,6 +2087,19 @@ class QWGT_SETTINGS(QtWidgets.QWidget):
 
 
 
+
+class Settings(object):
+    """
+    Functional class for Settings window
+    """
+    def __init__(self):
+        pass
+    
+    ## Some code from QWGT_SETTINGS will migrate here
+
+
+
+
 if __name__ == '__main__':
     INIT_TIME = time.time()
     ## Create Application
@@ -2123,6 +2125,7 @@ if __name__ == '__main__':
     CORE = Core()
     EXP = Export()
     FMN = FileManager()
+    STT = Settings()
 
     LOG.info('Initializing UIA')
     UIA = QWGT_PARTICIPANTS()
