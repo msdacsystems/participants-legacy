@@ -1055,7 +1055,7 @@ class Fields(object):
         Usually triggered after setting up the UI
         """
         LENGTH = len(DCFG['POOL']['ROLES'])
-        if not LENGTH:
+        if not LENGTH:                                                                                  ## Eliminates no-field issue when there's no data from pool
             PDB.generateDefault()
             LENGTH = 1
         self.addFields(LENGTH)
@@ -1080,6 +1080,8 @@ class Fields(object):
                 self.CBX_NMS[i].lineEdit().editingFinished.disconnect()
                 self.CBX_RLS[i].lineEdit().textChanged.disconnect()
                 self.CBX_NMS[i].lineEdit().textChanged.disconnect()
+                self.CBX_RLS[i].view().pressed.disconnect() ## FIX THIS
+                self.CBX_NMS[i].view().pressed.disconnect()
                 self.BTN_ATVS[i].clicked.disconnect()
             except Exception:                                                                           ## Throws exception when the buttons aren't connected yet which is not valid in the disconnect method
                 pass
@@ -1088,6 +1090,8 @@ class Fields(object):
                 self.CBX_NMS[i].lineEdit().editingFinished.connect(lambda: self.refreshItems())
                 self.CBX_RLS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('RLS'))
                 self.CBX_NMS[i].lineEdit().textChanged.connect(lambda: self.recordCbx('NMS'))
+                self.CBX_RLS[i].view().pressed.connect(lambda: self.popupOpened())
+                self.CBX_NMS[i].view().pressed.connect(lambda: self.popupOpened())
                 self.BTN_ATVS[i].clicked.connect(lambda: self.setActiveField())
                 self.BTN_INSS[i].mouseReleaseEvent = lambda event: self.mouseReleased('INSS', event)
                 self.BTN_REMS[i].mouseReleaseEvent = lambda event: self.mouseReleased('REMS', event)
@@ -1115,6 +1119,7 @@ class Fields(object):
         Overrides the LineEdit's editingFinished event
         Adds the edited text to an item to every combo boxes if eligible
         """
+        m = time.time()
         PROC = (self.CBX_RLS, RLS), (self.CBX_NMS, NMS)                                 ## Procedure Variable (Role Objects, Role List) & (Name Objects, Name List)
         s = 0                                                                           ## Step
 
@@ -1134,26 +1139,58 @@ class Fields(object):
             MERGE = [item for item in PROC[s][1] if item not in ITEMS]                  ## Merge with excess names from pool
             if len(MERGE):
                 for i, c in enumerate(PROC[s][0]):
-                    c.insertSeparator(c.count()-1)  ## <-- Not working for some reason
+                    # c.insertSeparator(c.count()-1)  ## <-- Not working for some reason
                     c.addItem(self.SEPARATOR)
                     c.addItems(MERGE)
 
-            ## Scan for identicals
-            # for i, c in enumerate(PROC[s][0]):
-            #     IDENTICAL = [c for c in i, c in enumerate(PROC[s][0][0]) if c.itemText(i) == HOLD_CBX[3]]
+            # ## Scan for identicals
+            # PARTIAL = ITEMS + MERGE
+            # IDENTICAL = [i for i in range(len(PROC[s][0])) if PROC[s][0][i].itemText(i) == HOLD_CBX[3]]
+            # IDENTICAL_TEXT = list(set([PROC[s][0][i].itemText(i) for i in range(len(PROC[s][0])) if PROC[s][0][i].itemText(i) == HOLD_CBX[3]]))
 
-            # p(IDENTICAL)
-            # if len(IDENTICAL):
-            #     for i, identical in enumerate(IDENTICAL):
-            #         p(PROC[s][0][identical].currentText())
-            #         if i != 0:
-            #             p(f'Removing {identical}')
-            #             PROC[s][0][identical].setCurrentIndex(IDENTICAL[0])
-            #             c.removeItem(i)
+
+            # if HOLD_CBX[3] != 0:
+            #     p(f"HOLD 3: {HOLD_CBX[3]}")
+            #     p(f"IDENTICAL: {IDENTICAL[1:]}")
+            #     p(f"IDENTICAL_TEXT: {IDENTICAL_TEXT[1:]}")
+            #     duplicated = False                                                          ## Indicator; 
+            #     for i, c in enumerate(PROC[s][0]):                                          ## Clear and fill up all CBX objects with items
+            #         c.clear()
+            #         placed = False                                                          ## Indicator; when set to False, the duplicated text is not yet added.
+
+            #         for j, item in enumerate(PARTIAL):                                      ## Add Items except the duplicated ones (allowing only 1 entry for duplicates)
+            #             if item in IDENTICAL_TEXT:
+            #                 if placed: continue
+            #                 else: placed = True
+            #             # if item == '': continue
+            #             # p(f"Adding {item} {j} {placed}")
+            #             if j == len(ITEMS): c.addItem(self.SEPARATOR)
+            #             c.addItem(item)
+
+            #         # p(f'Current Index: {i} {c.currentText()}')
+            #         p([c.itemText(x) for x in range(c.count())])
+            #         if i in IDENTICAL[1:]:
+            #             p(f'Rearranging duplicate index: {i} {c.currentText()}')
+            #             c.setCurrentIndex(IDENTICAL[0])
+            #             duplicated = True
+            #         else:
+            #             # p(f'Rearranging normal index: {i} {c.currentText()}')
+            #             play = i if not duplicated else i-(len(IDENTICAL)-1)
+            #             # p(play, duplicated)
+            #             c.setCurrentIndex(play)
+            #         # for l in range(self.FIELDS):
+            #         #     c.removeItem(0)
+
 
             if s > 0: break
             else: s += 1
 
+        showLatency(m)
+    
+
+    def popupOpened(self):
+        p('Openeeeedd!!')
+        
 
     def fillupItems(self):
         """
@@ -1161,12 +1198,8 @@ class Fields(object):
 
         This method also removes blank string retrieved from a pool.
         """
-        m = time.time()
-        R_ITEMS, N_ITEMS = [], []
-
-        ## Sets the index to its exact position
         for i,(r,n) in enumerate(zip(self.CBX_RLS, self.CBX_NMS)):
-            r.setCurrentIndex(i)
+            r.setCurrentIndex(i)                                                            ## Sets the index to its exact position
             n.setCurrentIndex(i)
 
             if r.currentText() == '': r.setCurrentIndex(-1)                                 ## Rebind to none
