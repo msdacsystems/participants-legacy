@@ -865,6 +865,13 @@ class Stylesheet(object):
                 QScrollBar::handle:horizontal {{
                     background-color: {self.SCROLLBAR}; min-width: 20px; margin: 3px; border-radius: {RADIUS_SML}; border: none;
                 }}
+                QScrollBar::handle::hover {{
+                    background-color: {modHex(self.SCROLLBAR, 20)}; min-width: 20px; margin: 3px; border-radius: {RADIUS_SML}; border: none;
+                }}
+                QScrollBar::handle::pressed {{
+                    background-color: {self.PRIMARY}; min-width: 20px; margin: 3px; border-radius: {RADIUS_SML}; border: none;
+                }}
+
                 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                     border: none; background: none; height: 0px;
                 }}
@@ -2623,6 +2630,7 @@ class Members(object):
                 SPC_V1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
                 SPC_V2 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
                 self.LNE_RENAME = QtWidgets.QLineEdit(self); self.LNE_RENAME.setObjectName("LNE_RENAME")
+                self.LNE_RENAME.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. ]+")))
                 self.BTN_BOX = QtWidgets.QDialogButtonBox(self); self.BTN_BOX.setObjectName("BTN_BOX")
                 self.BTN_BOX.setStandardButtons(QtWidgets.QDialogButtonBox.Cancel|QtWidgets.QDialogButtonBox.Ok)
 
