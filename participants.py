@@ -2243,8 +2243,8 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.GRID_MEMBERS.addWidget(self.BTN_MEM_EDIT, 3, 1, 1, 1)
         self.GRID_MEMBERS.addWidget(self.BTN_MEM_REMOVE, 4, 1, 1, 1)
         self.GRID_MEMBERS.addItem(SPC_MEM_V1, 5, 1, 1, 1)
-        self.GRID_MEMBERS.addWidget(self.BTN_MEM_SAVE, 6, 1, 1, 1)
-        self.GRID_MEMBERS.addWidget(self.BTN_MEM_IMPORT, 7, 1, 1, 1)
+        self.GRID_MEMBERS.addWidget(self.BTN_MEM_IMPORT, 6, 1, 1, 1)
+        self.GRID_MEMBERS.addWidget(self.BTN_MEM_SAVE, 7, 1, 1, 1)
         self.GRID_MEMBERS.addWidget(self.BTN_MEM_EXPORT, 8, 1, 1, 1)
         self.GRID_MEMBERS.addWidget(self.GBX_MEM_DETAILS, 10, 0, 1, 2)
 
@@ -2341,7 +2341,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         ## Members
         self.LNE_MEM_SEARCHADD.mouseReleaseEvent = lambda event: MEM.searchClicked(event)
         self.LNE_MEM_SEARCHADD.textChanged.connect(lambda: MEM.checkSearchAdd())
-        self.LST_MEM_MEMBERS.itemClicked.connect(lambda: MEM.itemClicked())
+        self.LST_MEM_MEMBERS.itemSelectionChanged.connect(lambda: MEM.itemChanged())
         self.BTN_MEM_ADD.clicked.connect(lambda: MEM.addNewMember())
         self.BTN_MEM_EDIT.clicked.connect(lambda: MEM.editMember())
         self.BTN_MEM_REMOVE.clicked.connect(lambda: MEM.removeMember())
@@ -2481,7 +2481,7 @@ class Members(object):
     """
     def __init__(self):
         self.DUPLICATE_THRESHOLD = 0.85                                     ## Sets how sensitive is the duplicate scanner
-        self.EXPORT_THRESHOLD = 7                                           ## Number of names to be allowed for exporting a member list
+        self.ITEMS_THRESHOLD = 7                                           ## Number of names to be allowed for exporting a member list
         self.SEARCH_MODE = False
         self.LAST_INPUT = ''
         self.SAVED_STATE = True
@@ -2490,7 +2490,7 @@ class Members(object):
     def setup(self):
         UIB.LST_MEM_MEMBERS.clear()
         UIB.LST_MEM_MEMBERS.addItems(DCFG["POOL"]["NAMES"])
-        self.LAST_ITEMS = self.getMembers()
+        self.CURRENT_MEMBERS = self.getMembers()
         self.generalRefresh()
 
 
@@ -2506,10 +2506,12 @@ class Members(object):
         """
         Handles search/add bar (line edit)
         """
+        UIB.BTN_MEM_ADD.setToolTip(f'Add {UIB.LNE_MEM_SEARCHADD.text()} to member list')
+
         if len(UIB.LNE_MEM_SEARCHADD.text()) < len(self.LAST_INPUT):
             self.SEARCH_MODE = True
             UIB.LST_MEM_MEMBERS.clear()
-            UIB.LST_MEM_MEMBERS.addItems(self.LAST_ITEMS)
+            UIB.LST_MEM_MEMBERS.addItems(self.CURRENT_MEMBERS)
 
         if UIB.LNE_MEM_SEARCHADD.text() != '':
             UIB.BTN_MEM_ADD.setEnabled(True)
@@ -2525,7 +2527,7 @@ class Members(object):
     
     def filterItems(self):
         INPUT = re.sub(r"[^A-Za-z]+", '', UIB.LNE_MEM_SEARCHADD.text().lower())                             ## Use RegEx to filter out non-alphabet characters
-        OUTPUT = [n for n in self.LAST_ITEMS if INPUT in re.sub(r"[^A-Za-z]+", '', n.lower())]
+        OUTPUT = [n for n in self.CURRENT_MEMBERS if INPUT in re.sub(r"[^A-Za-z]+", '', n.lower())]
         UIB.LST_MEM_MEMBERS.clear()
         UIB.LST_MEM_MEMBERS.addItems(OUTPUT)
         UIB.LST_MEM_MEMBERS.sortItems()
@@ -2541,16 +2543,16 @@ class Members(object):
         Uses Levenshtein Ratio method to determine the similarity
         of the existing names vs the proposed name entry
         """
-        MEMBERS = self.LAST_ITEMS
+        MEMBERS = self.CURRENT_MEMBERS
         if renaming is not None: MEMBERS.remove(renaming) 
         return [n for n in MEMBERS if lev.ratio(n.lower(), name.lower()) > self.DUPLICATE_THRESHOLD]
         
 
-    def displayDialog(self, mode, similar:list, name=''):
+    def displayDialog(self, mode, similar:list=None, name=''):
         """
         Constructor method for similar names dialog
         """
-        if not mode:
+        if mode == 0:
             LOG.warn(f"Members: Duplicate name detected: {name}")
             MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
             MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
@@ -2559,7 +2561,7 @@ class Members(object):
             MSG_BOX.setText(f"{name} is already in the list.")
             MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
 
-        elif mode:
+        elif mode == 1:
             LOG.info(f'Members: Similar names detected: {", ".join(similar)}')
             MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
             MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
@@ -2569,6 +2571,15 @@ class Members(object):
             MSG_BOX.setDetailedText("Similar name(s):\n\n" + "\n".join(map(str, [f'{str(i+1).zfill(len(str(len(similar))))}. {n}' for i, n in enumerate(similar)])))
             MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
            
+        elif mode == 2:
+            LOG.info(f'Members: Too few members for exporting')
+            MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
+            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
+            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
+            MSG_BOX.setText(f"The list only contains {len(self.getMembers())} member(s)\nDo you still want to continue?")
+            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
+
         return MSG_BOX
 
 
@@ -2579,21 +2590,16 @@ class Members(object):
         """
         ## Check for duplicate
         PROPOSED = UIB.LNE_MEM_SEARCHADD.text().strip()
-        if PROPOSED.lower() in map(lambda i: i.lower().strip(), self.LAST_ITEMS):
-            MSG_BOX = self.displayDialog(0, self.getSimilarNames(PROPOSED), PROPOSED)
-            MSG_BOX.exec_()
-            return
+        if PROPOSED.lower() in map(lambda i: i.lower().strip(), self.CURRENT_MEMBERS):
+            self.displayDialog(0, self.getSimilarNames(PROPOSED), PROPOSED).exec_(); return
 
         elif self.hasDuplicateName(PROPOSED):
-            MSG_BOX = self.displayDialog(1, self.getSimilarNames(PROPOSED))
-            RET = MSG_BOX.exec_()
-            if RET != QtWidgets.QMessageBox.Yes:
-                return
+            if self.displayDialog(1, self.getSimilarNames(PROPOSED)).exec_() != QtWidgets.QMessageBox.Yes: return
 
         UIB.LNE_MEM_SEARCHADD.clear()
         UIB.LST_MEM_MEMBERS.addItem(PROPOSED)
         UIB.LST_MEM_MEMBERS.sortItems()
-        self.LAST_ITEMS = self.getMembers()
+        self.CURRENT_MEMBERS = self.getMembers()
         UIB.LST_MEM_MEMBERS.findItems(PROPOSED, QtCore.Qt.MatchExactly)[0].setSelected(True)
         self.SAVED_STATE = False
         self.generalRefresh()
@@ -2626,7 +2632,7 @@ class Members(object):
                 self.GRID_MAIN.addWidget(self.LNE_RENAME, 2, 0, 1, 1)
                 self.GRID_MAIN.addWidget(self.BTN_BOX, 5, 0, 1, 1)
 
-                self.LBL_RENAME.setText(f"Set new name for {OLD_NAME}")
+                self.LBL_RENAME.setText(f"Set a new name for {OLD_NAME}")
                 self.LNE_RENAME.setText(OLD_NAME)
                 self.BTN_BOX.accepted.connect(lambda: self.accept())
                 self.BTN_BOX.rejected.connect(lambda: self.reject())
@@ -2641,14 +2647,13 @@ class Members(object):
                         self.hide()
 
                     elif NEW_NAME.lower() in MEM.getMembers(True):
-                        MSG_BOX = MEM.displayDialog(0, MEM.getSimilarNames(NEW_NAME), NEW_NAME); MSG_BOX.exec_(); return
+                        MEM.displayDialog(0, MEM.getSimilarNames(NEW_NAME), NEW_NAME).exec_(); return
 
                     elif MEM.hasDuplicateName(NEW_NAME, OLD_NAME):
-                        MSG_BOX = MEM.displayDialog(1, MEM.getSimilarNames(NEW_NAME))
-                        if MSG_BOX.exec_() != QtWidgets.QMessageBox.Yes: return     
+                        if MEM.displayDialog(1, MEM.getSimilarNames(NEW_NAME)).exec_() != QtWidgets.QMessageBox.Yes: return     
 
                     UIB.LST_MEM_MEMBERS.selectedItems()[0].setText(NEW_NAME)
-                    MEM.LAST_ITEMS = MEM.getMembers()         
+                    MEM.CURRENT_MEMBERS = MEM.getMembers()         
                 self.hide()      
 
             def reject(self):
@@ -2663,19 +2668,28 @@ class Members(object):
     def removeMember(self):
         for i in UIB.LST_MEM_MEMBERS.selectedItems():
             UIB.LST_MEM_MEMBERS.takeItem(UIB.LST_MEM_MEMBERS.row(i))
-            self.LAST_ITEMS = self.getMembers()
 
+        self.CURRENT_MEMBERS = self.getMembers()
         self.SAVED_STATE = False
         self.generalRefresh()
 
 
-    def itemClicked(self):
+    def itemChanged(self):
         UIB.BTN_MEM_ADD.setEnabled(False)
-        self.generalRefresh()
 
-    
+        self.generalRefresh() 
+
+        try:
+            if len(UIB.LST_MEM_MEMBERS.selectedItems()):
+                UIB.BTN_MEM_EDIT.setToolTip(f'Rename "{UIB.LST_MEM_MEMBERS.currentItem().text()}"')
+                UIB.BTN_MEM_REMOVE.setToolTip(f'Remove "{UIB.LST_MEM_MEMBERS.currentItem().text()}" from the list')
+        except AttributeError:
+            UIB.BTN_MEM_EDIT.setToolTip(f'Rename this member')
+            UIB.BTN_MEM_REMOVE.setToolTip(f'Remove this member from the list')
+
+
     def searchClicked(self, event):
-        UIB.BTN_MEM_ADD.setEnabled(True)
+        UIB.BTN_MEM_ADD.setEnabled(True if len(self.CURRENT_MEMBERS) and UIB.LNE_MEM_SEARCHADD.text() != '' else False)
 
 
     def generalRefresh(self):
@@ -2693,27 +2707,41 @@ class Members(object):
         """
         UIB.BTN_MEM_REMOVE.setEnabled(True if len(UIB.LST_MEM_MEMBERS.selectedItems()) else False)                  ## Remove Button Handler
         UIB.BTN_MEM_EDIT.setEnabled(True if len(UIB.LST_MEM_MEMBERS.selectedItems()) else False)
-        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getMembers()) else False)
         UIB.BTN_MEM_EXPORT.setEnabled(True if not self.SEARCH_MODE else False)
-        UIB.BTN_MEM_SAVE.setEnabled(True if not self.SAVED_STATE else False)
+        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getMembers()) else False)
+        UIB.BTN_MEM_SAVE.setEnabled(True if len(self.getMembers()) and not self.SAVED_STATE else False)
     
 
     def refreshDetails(self):
         """
         Refreshes the details tab 
         """
-        ITEMS = self.LAST_ITEMS
-        DATA = [0, 0, 0, 0]                                                                                       ## Members, Men, Women, Others
+        ITEMS = self.CURRENT_MEMBERS
+        DATA = [len(self.CURRENT_MEMBERS), 0, 0, 0]                                                                   ## Members, Men, Women, Others
 
         DATA[1] = len(list(filter(re.compile("(?i)^bro[. ]").match, ITEMS)))
         DATA[2] = len(list(filter(re.compile("(?i)^sis[. ]").match, ITEMS)))
-        DATA[0] = len(self.LAST_ITEMS)
         DATA[3] = DATA[0] - (DATA[1] + DATA[2])
 
+        UIB.LBL_DET_MEMBERS.setEnabled(True if DATA[0] else False)
+        UIB.LBL_DET_MEN.setEnabled(True if DATA[1] else False)
+        UIB.LBL_DET_WOMEN.setEnabled(True if DATA[2] else False)
+        UIB.LBL_DET_OTHERS.setEnabled(True if DATA[3] else False)
+
+        if not DATA[0]:
+            UIB.LBL_DET_MEMBERS.setText('There are no members here...')
+            UIB.LNE_MEM_SEARCHADD.setPlaceholderText('Type the name of your first member here')
+            UIB.LBL_DET_MEN.clear()
+            UIB.LBL_DET_WOMEN.clear()
+            UIB.LBL_DET_OTHERS.clear()
+            return
+
+        
+        UIB.LNE_MEM_SEARCHADD.setPlaceholderText('Search or type to add new member')
         UIB.LBL_DET_MEMBERS.setText(f"Members: {DATA[0]}")
-        UIB.LBL_DET_MEN.setText(f"Men: {DATA[1]} {f'({round((DATA[1]*100)/DATA[0])}%)' if DATA[1] else ''}")
-        UIB.LBL_DET_WOMEN.setText(f"Women: {DATA[2]} {f'({round((DATA[2]*100)/DATA[0])}%)' if DATA[2] else ''}")
-        UIB.LBL_DET_OTHERS.setText(f"Others: {DATA[3]} {f'({round((DATA[3]*100)/DATA[0])}%)' if DATA[3] else ''}")
+        UIB.LBL_DET_MEN.setText(f'Men: ' + (f"{DATA[1]} <font color={QSS.TXT_DISABLED}>({round((DATA[1]*100)/DATA[0])}%)</font>" if DATA[1] else '...'))
+        UIB.LBL_DET_WOMEN.setText(f'Women: ' + (f"{DATA[2]} <font color={QSS.TXT_DISABLED}>({round((DATA[2]*100)/DATA[0])}%)</font>" if DATA[2] else '...'))
+        UIB.LBL_DET_OTHERS.setText(f'Others: ' + (f"{DATA[3]} <font color={QSS.TXT_DISABLED}>({round((DATA[3]*100)/DATA[0])}%)</font>" if DATA[3] else '...'))
         
 
     def importMemberList(self):
@@ -2745,19 +2773,10 @@ class Members(object):
         """
         Export current values into a encrypted JSON file
         """
-        if len(self.LAST_ITEMS) < self.EXPORT_THRESHOLD:
-            LOG.info(f'Members: Too few members for exporting')
-            MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
-            MSG_BOX.setText(f"The list only contains {len(self.getMembers())} member(s)\nDo you still want to continue?")
-            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
-            RET = MSG_BOX.exec_()
-            if RET != QtWidgets.QMessageBox.Yes:
-                return
+        if len(self.CURRENT_MEMBERS) < self.ITEMS_THRESHOLD:
+            if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
 
-        MEMBERS = {"MEMBER_LIST": self.LAST_ITEMS, "DATE_GENERATED": time.time()}
+        MEMBERS = {"MEMBER_LIST": self.CURRENT_MEMBERS, "DATE_GENERATED": time.time()}
         MEMBERS = json.dumps(MEMBERS, indent=None, sort_keys=True)
         
         FILE, EXT = QtWidgets.QFileDialog.getSaveFileName(None, "Export Member List", PKG.DIR_EXPORT_MEMLIST, "*.prt")
@@ -2774,13 +2793,17 @@ class Members(object):
             PKG.DIR_EXPORT_MEMLIST = FILE
             PDB.dump()
             LOG.info(f"Member list \"{FILE}\" was successfully exported.")
+            self.saveMemberList(True)
 
     
-    def saveMemberList(self):
+    def saveMemberList(self, bypassDialog=False):
         """
         Saves the current member list
         """
-        DCFG['POOL'].update({"NAMES": self.LAST_ITEMS})
+        if len(self.CURRENT_MEMBERS) < self.ITEMS_THRESHOLD and not bypassDialog:
+            if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
+            
+        DCFG['POOL'].update({"NAMES": self.CURRENT_MEMBERS})
         PDB.dump()
         self.SAVED_STATE = True
         LOG.info(f"Member list was successfully saved.")
@@ -2802,8 +2825,8 @@ class Settings(object):
 
 if __name__ == '__main__':
     INIT_TIME = time.time()
-    ## Create Application
     
+    ## Create Application
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
