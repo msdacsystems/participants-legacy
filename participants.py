@@ -2489,9 +2489,9 @@ class Members(object):
     def __init__(self):
         self.DUPLICATE_THRESHOLD = 0.85                                     ## Sets how sensitive is the duplicate scanner
         self.ITEMS_THRESHOLD = 7                                           ## Number of names to be allowed for exporting a member list
-        self.SEARCH_MODE = False
+        self.SEARCH_STATE = False
         self.LAST_INPUT = ''
-        self.SAVED_STATE = True
+        self.SAVE_STATE = True
 
 
     def setup(self):
@@ -2515,19 +2515,20 @@ class Members(object):
         """
         UIB.BTN_MEM_ADD.setToolTip(f'Add {UIB.LNE_MEM_SEARCHADD.text()} to member list')
 
+
         if len(UIB.LNE_MEM_SEARCHADD.text()) < len(self.LAST_INPUT):
-            self.SEARCH_MODE = True
+            self.SEARCH_STATE = True
             UIB.LST_MEM_MEMBERS.clear()
             UIB.LST_MEM_MEMBERS.addItems(self.CURRENT_MEMBERS)
 
         if UIB.LNE_MEM_SEARCHADD.text() != '':
             UIB.BTN_MEM_ADD.setEnabled(True)
-            self.SEARCH_MODE = True
+            self.SEARCH_STATE = True
             self.filterItems()
 
-        if not len(UIB.LNE_MEM_SEARCHADD.text()):
+        if UIB.LNE_MEM_SEARCHADD.text() == '':
             UIB.BTN_MEM_ADD.setEnabled(False)
-            self.SEARCH_MODE = False
+            self.SEARCH_STATE = False
         
         self.generalRefresh()
 
@@ -2608,7 +2609,7 @@ class Members(object):
         UIB.LST_MEM_MEMBERS.sortItems()
         self.CURRENT_MEMBERS = self.getMembers()
         UIB.LST_MEM_MEMBERS.findItems(PROPOSED, QtCore.Qt.MatchExactly)[0].setSelected(True)
-        self.SAVED_STATE = False
+        self.SAVE_STATE = False
         self.generalRefresh()
 
 
@@ -2669,7 +2670,7 @@ class Members(object):
         
         gc.collect()
         DLG_RENAME()
-        self.SAVED_STATE = False
+        self.SAVE_STATE = False
         self.generalRefresh()
             
     
@@ -2678,7 +2679,7 @@ class Members(object):
             UIB.LST_MEM_MEMBERS.takeItem(UIB.LST_MEM_MEMBERS.row(i))
 
         self.CURRENT_MEMBERS = self.getMembers()
-        self.SAVED_STATE = False
+        self.SAVE_STATE = False
         self.generalRefresh()
 
 
@@ -2713,11 +2714,15 @@ class Members(object):
         """
         Handles all button-related items for Members tab
         """
-        UIB.BTN_MEM_REMOVE.setEnabled(True if len(UIB.LST_MEM_MEMBERS.selectedItems()) else False)                  ## Remove Button Handler
-        UIB.BTN_MEM_EDIT.setEnabled(True if len(UIB.LST_MEM_MEMBERS.selectedItems()) else False)
-        UIB.BTN_MEM_EXPORT.setEnabled(True if not self.SEARCH_MODE else False)
-        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getMembers()) else False)
-        UIB.BTN_MEM_SAVE.setEnabled(True if len(self.getMembers()) and not self.SAVED_STATE else False)
+        if len(UIB.LST_MEM_MEMBERS.selectedItems()):
+            UIB.BTN_MEM_REMOVE.setEnabled(True)
+            UIB.BTN_MEM_EDIT.setEnabled(True)
+        else:
+            UIB.BTN_MEM_REMOVE.setEnabled(False); UIB.BTN_MEM_REMOVE.setToolTip('')
+            UIB.BTN_MEM_EDIT.setEnabled(False); UIB.BTN_MEM_EDIT.setToolTip('')
+
+        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getMembers()) and not self.SEARCH_STATE else False)
+        UIB.BTN_MEM_SAVE.setEnabled(True if len(self.getMembers()) and not self.SAVE_STATE else False)
     
 
     def refreshDetails(self):
@@ -2813,7 +2818,7 @@ class Members(object):
             
         DCFG['POOL'].update({"NAMES": self.CURRENT_MEMBERS})
         PDB.dump()
-        self.SAVED_STATE = True
+        self.SAVE_STATE = True
         LOG.info(f"Member list was successfully saved.")
         self.generalRefresh()
 
