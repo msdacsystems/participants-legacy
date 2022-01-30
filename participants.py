@@ -500,7 +500,6 @@ class Stylesheet(object):
                     background-color: palette(button);
                     padding: {PADDING};
                     border-radius: {RADIUS};
-                    outline: none;
                     border: 1px solid {modHex(self.palette2Hex('button'), 7)}
                 }}
                 QPushButton::pressed {{
@@ -926,7 +925,7 @@ class Stylesheet(object):
             
 
 
-                /* Checkboxes */
+                /* Checkboxes (Toggle Switches) */
                 QCheckBox {{
                     outline: none;
                 }}
@@ -934,17 +933,20 @@ class Stylesheet(object):
                     width: 23px;
                     height: 23px;
                 }}
-                QCheckBox::indicator:unchecked {{
-                    image: url(./res/icons/unchecked.png);
+                QCheckBox::indicator::unchecked {{
+                    image: url(./res/icons/off.png);
                 }}
-                QCheckBox::indicator:unchecked::hover {{
-                    image: url(./res/icons/unchecked_hover.png);
+                QCheckBox::indicator::unchecked::hover {{
+                    image: url(./res/icons/off_hover.png);
                 }}
-                QCheckBox::indicator:checked {{
-                    image: url(./res/icons/checked.png);
+                QCheckBox::indicator::checked {{
+                    image: url(./res/icons/on.png);
                 }}
-                QCheckBox::indicator:checked::hover {{
-                    image: url(./res/icons/checked_hover.png);
+                QCheckBox::indicator::checked::hover {{
+                    image: url(./res/icons/on_hover.png);
+                }}
+                QCheckBox::indicator::disabled {{
+                    image: url(./res/icons/toggle_disabled.png);
                 }}
 
 
@@ -1102,7 +1104,7 @@ class Core(object):
     Contains methods that are used for better user experience
     """
     def __init__(self):
-        pass
+        self.IGNORED_CASE = ['of', 'to', 'and', 'by', 'for']
 
 
     def centerWindow(self, ui):
@@ -1140,6 +1142,14 @@ class Core(object):
         SS_A = roles.split('\n', int(len(roles.split('\n'))/2)); DS_A = SS_A[-1].split('\n', int(len(SS_A[-1].split('\n'))/2)); SS_A.pop(-1)
         SS_B = names.split('\n', int(len(names.split('\n'))/2)); DS_B = SS_B[-1].split('\n', int(len(SS_B[-1].split('\n'))/2)); SS_B.pop(-1)
         return (SS_A, SS_B, DS_A, DS_B)
+
+
+    def adjustRoleFormat(self, role:str):
+        """
+        Return the role string to a presentable format
+        """
+        return ' '.join(map(str, [f"{w[:1].upper()}{w[1:].lower()}" if w.lower() not in
+                self.IGNORED_CASE else w.lower() for w in role.split()]))
 
 
 
@@ -1247,10 +1257,18 @@ class Fields(object):
         m = time.time()
         PRCD = (self.CBX_RLS, RLS), (self.CBX_NMS, NMS)                                 ## Procedure Variable (Role Objects, Role List) & (Name Objects, Name List)
         s = 0                                                                           ## Step
+        
+        try:
+            HCBX = self.PREV_CBX                                                        ## Used for holding values for previous recorded CBX
+            CMB_RECENT = PRCD[HCBX[0]][0][HCBX[1]]
+            CONVERTED = (CORE.adjustRoleFormat(CMB_RECENT.currentText())                ## Converts the string to name-case
+                if not HCBX[0] else MEM.adjustNameFormat(CMB_RECENT.currentText()))
+            CMB_RECENT.setCurrentText(CONVERTED)
+        except IndexError:
+            pass
 
         while True:
-            ITEMS = [c.currentText() for c in PRCD[s][0]]                               ## Retrieve all current items displayed
-            HOLD_CBX = self.PREV_CBX                                                    ## Used for holding values for previous recorded CBX
+            ITEMS = [c.currentText().strip() for c in PRCD[s][0]]                       ## Retrieve all current items displayed
 
             for i, c in enumerate(PRCD[s][0]):                                          ## Clear and fill up all CBX objects with items
                 c.clear()
@@ -1268,14 +1286,15 @@ class Fields(object):
                     c.addItem(self.SEPARATOR)
                     c.addItems(MERGE)
 
+
             # ## Scan for identicals
             # PARTIAL = ITEMS + MERGE
-            # IDENTICAL = [i for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HOLD_CBX[3]]
-            # IDENTICAL_TEXT = list(set([PRCD[s][0][i].itemText(i) for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HOLD_CBX[3]]))
+            # IDENTICAL = [i for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HCBX[3]]
+            # IDENTICAL_TEXT = list(set([PRCD[s][0][i].itemText(i) for i in range(len(PRCD[s][0])) if PRCD[s][0][i].itemText(i) == HCBX[3]]))
 
 
-            # if HOLD_CBX[3] != 0:
-            #     p(f"HOLD 3: {HOLD_CBX[3]}")
+            # if HCBX[3] != 0:
+            #     p(f"HOLD 3: {HCBX[3]}")
             #     p(f"IDENTICAL: {IDENTICAL[1:]}")
             #     p(f"IDENTICAL_TEXT: {IDENTICAL_TEXT[1:]}")
             #     duplicated = False                                                          ## Indicator; 
@@ -1333,6 +1352,7 @@ class Fields(object):
         Redirects function to UIA's Field Insertion function.
         Triggers from the Add button via PyQt signal 
         """
+        m = time.time()
         for i, btn in enumerate(self.BTN_INSS):
             if not btn.hasFocus(): continue
             self.insertField(i)
@@ -1340,7 +1360,8 @@ class Fields(object):
             if duplicate:
                 self.CBX_RLS[i+1].setCurrentIndex(self.CBX_RLS[i].findText(self.CBX_RLS[i].currentText()))
                 self.CBX_NMS[i+1].setCurrentIndex(self.CBX_NMS[i].findText(self.CBX_NMS[i].currentText()))
-            break      
+            break
+        showLatency(m)
 
 
     def setActiveField(self):
@@ -1430,7 +1451,7 @@ class Fields(object):
         self.CBX_RLS[pos].addItems(RLS)
         self.CBX_RLS[pos].setCurrentText('')
         self.CBX_RLS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
-        # for i in range(self.CBX_RLS[pos].count()): self.CBX_RLS[pos].setItemIcon(i, QtGui.QIcon('res/icons/right_arrow.png'))
+        self.CBX_RLS[pos].wheelEvent = lambda e: self.ignoreWheel(e)
 
         self.CBX_NMS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL); self.CBX_NMS[pos].setObjectName(f"CBX_NMS")
         self.CBX_NMS[pos].view().window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
@@ -1440,19 +1461,22 @@ class Fields(object):
         self.CBX_NMS[pos].addItems(NMS)
         self.CBX_NMS[pos].setCurrentText('')
         self.CBX_NMS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
-        # for i in range(self.CBX_NMS[pos].count()): self.CBX_NMS[pos].setItemIcon(i, QtGui.QIcon('res/icons/user.png'))
+        self.CBX_NMS[pos].wheelEvent = lambda e: self.ignoreWheel(e)
 
         self.BTN_ATVS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
         self.BTN_ATVS[pos].setMaximumWidth(25);        self.BTN_ATVS[pos].setMinimumHeight(30)
         self.BTN_ATVS[pos].setToolTip(self.TTIP_BTN_ATVS)
+        self.BTN_ATVS[pos].setFocusPolicy(Qt.ClickFocus)
 
         self.BTN_INSS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
         self.BTN_INSS[pos].setMaximumWidth(26); self.BTN_INSS[pos].setMinimumHeight(30)
         self.BTN_INSS[pos].setToolTip(self.TTIP_BTN_INSS)
+        self.BTN_INSS[pos].setFocusPolicy(Qt.ClickFocus)
 
         self.BTN_REMS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
         self.BTN_REMS[pos].setMaximumWidth(25); self.BTN_REMS[pos].setMinimumHeight(30)
         self.BTN_REMS[pos].setToolTip(self.TTIP_BTN_REMS)
+        self.BTN_REMS[pos].setFocusPolicy(Qt.ClickFocus)
 
         ## Finally adds those widgets into vertical layouts
         UIA.LYT_ROLES.insertWidget(pos, self.CBX_RLS[pos])
@@ -1543,6 +1567,10 @@ class Fields(object):
                 self.lockUnlockField()
 
 
+    def ignoreWheel(self, event):
+        pass
+    
+
     def recordCbx(self, cbx):
         """
         Overrides TextChanged event of combo boxes 
@@ -1587,6 +1615,17 @@ class Fields(object):
             NAMES += [i for i in NMS if i not in NAMES]
         
         return ROLES, NAMES, DICT
+
+    
+    def checkKeyPress(self, e):
+        """
+        Handles forwarded KeyPressEvent from UIA for field switching via Enter|Return key
+        """
+        TGT = self.CBX_NMS if self.PREV_CBX[0] else self.CBX_RLS
+        for i, cbx in enumerate(TGT):
+            if not cbx.hasFocus(): continue
+            TGT[i+1 if i+1 != len(TGT) else 0].setFocus()
+            break
 
 
 
@@ -2035,6 +2074,11 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         Handles UIA's main window title
         """
         self.setWindowTitle(f"{SW.NAME} ({FLD.FIELDS})")
+
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Enter, Qt.Key_Return):
+            FLD.checkKeyPress(e)
     
     
 
@@ -2078,7 +2122,8 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         ## General Tab
         self.TAB_GENERAL = QtWidgets.QWidget(); self.TAB_GENERAL.setObjectName("TAB_GENERAL")
         self.GBX_GEN_APPEARANCE = QtWidgets.QGroupBox(self.TAB_GENERAL); self.GBX_GEN_APPEARANCE.setObjectName("GBX_GEN_APPEARANCE")
-        self.CBX_GEN_ALWAYS_ON_TOP = QtWidgets.QCheckBox(self.GBX_GEN_APPEARANCE); self.CBX_GEN_ALWAYS_ON_TOP.setObjectName("CBX_GEN_ALWAYS_ON_TOP")
+        self.CHK_GEN_ALWAYS_ON_TOP = QtWidgets.QCheckBox(self.GBX_GEN_APPEARANCE); self.CHK_GEN_ALWAYS_ON_TOP.setObjectName("CHK_GEN_ALWAYS_ON_TOP")
+        self.CHK_GEN_USE_SUGGESTED = QtWidgets.QCheckBox(self.GBX_GEN_APPEARANCE); self.CHK_GEN_USE_SUGGESTED.setObjectName("CHK_GEN_USE_SUGGESTED")
 
         self.GBX_GEN_PRESETS = QtWidgets.QGroupBox(self.TAB_GENERAL); self.GBX_GEN_PRESETS.setObjectName("GBX_GEN_PRESETS")
         self.LST_GEN_PRESETS = QtWidgets.QListWidget(self.GBX_GEN_PRESETS); self.LST_GEN_PRESETS.setObjectName("LST_GEN_PRESETS")
@@ -2088,7 +2133,6 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
 
         ## Presentation Tab
         self.TAB_PRESENTATION = QtWidgets.QWidget(); self.TAB_PRESENTATION.setObjectName("TAB_PRESENTATION")
-        self.BTN_PRES_RESET = QtWidgets.QPushButton(self.TAB_PRESENTATION); self.BTN_PRES_RESET.setObjectName("BTN_PRES_RESET")
 
         ## Presentation - Content
         self.GBX_PRES_CONTENT = QtWidgets.QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_CONTENT.setObjectName("GBX_PRES_CONTENT")
@@ -2098,6 +2142,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.LNE_CNTT_SUBTITLE = QtWidgets.QLineEdit(self.GBX_PRES_CONTENT); self.LNE_CNTT_SUBTITLE.setObjectName("LNE_CNTT_SUBTITLE"); self.LNE_CNTT_SUBTITLE.setClearButtonEnabled(True)
         self.CHK_CNTT_DISPDATE = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_DISPDATE.setObjectName("CHK_CNTT_DISPDATE")
         self.CHK_CNTT_USEWIDESCR = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_USEWIDESCR.setObjectName("CHK_CNTT_USEWIDESCR")
+        self.CHK_CNTT_ENABLECBXSCROLL = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_ENABLECBXSCROLL.setObjectName("CHK_CNTT_ENABLECBXSCROLL")
         
         ## Presentation - Fonts and Colors
         self.GBX_PRES_FONTSCOLORS = QtWidgets.QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_FONTSCOLORS.setObjectName("GBX_PRES_FONTSCOLORS")
@@ -2130,6 +2175,8 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.LBL_BG_PREVIEW = QtWidgets.QLabel(self.GBX_PRES_BACKGROUND); self.LBL_BG_PREVIEW.setObjectName("LBL_BG_PREVIEW"); self.LBL_BG_PREVIEW.setAlignment(QtCore.Qt.AlignCenter)
         self.PIX_BG_PREVIEW = QtWidgets.QLabel(self.GBX_PRES_BACKGROUND); self.PIX_BG_PREVIEW.setObjectName("PIX_BG_PREVIEW"); self.PIX_BG_PREVIEW.setAlignment(QtCore.Qt.AlignCenter)        
         self.PIX_BG_PREVIEW.setPixmap(QtGui.QPixmap(PKG.IMG_BACKGROUND).scaledToHeight(self.BG_SCALING, QtCore.Qt.KeepAspectRatio & Qt.SmoothTransformation))
+        
+        self.BTN_PRES_RESET = QtWidgets.QPushButton(self.TAB_PRESENTATION); self.BTN_PRES_RESET.setObjectName("BTN_PRES_RESET")
 
         ## Members Tab
         self.TAB_MEMBERS = QtWidgets.QWidget(); self.TAB_MEMBERS.setObjectName("TAB_MEMBERS")
@@ -2188,7 +2235,9 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.GRID_GENERAL.addWidget(self.GBX_GEN_PRESETS, 1, 0, 1, 1)
         self.GRID_GENERAL.addItem(SPC_GENERAL_V, 2, 0, 1, 1)
 
-        self.GRID_GEN_APPEARANCE.addWidget(self.CBX_GEN_ALWAYS_ON_TOP, 0, 0, 1, 1)
+        self.GRID_GEN_APPEARANCE.addWidget(self.CHK_GEN_ALWAYS_ON_TOP, 0, 0, 1, 1)
+        self.GRID_GEN_APPEARANCE.addWidget(self.CHK_GEN_USE_SUGGESTED, 1, 0, 1, 1)
+        self.GRID_GEN_APPEARANCE.addWidget(self.CHK_CNTT_ENABLECBXSCROLL, 2, 0, 1, 1)
 
         self.GRID_GEN_PRESETS.addWidget(self.LST_GEN_PRESETS, 0, 0, 6, 1)
         self.GRID_GEN_PRESETS.addWidget(self.BTN_GEN_IMPORT, 0, 1, 1, 1)
@@ -2269,7 +2318,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
 
     
     def setupValidators(self):
-        self.LNE_MEM_SEARCHADD.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. ]+")))
+        self.LNE_MEM_SEARCHADD.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. -]+")))
 
 
     def setupDisplay(self):
@@ -2281,7 +2330,9 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.TBW_SETTINGS.setTabText(self.TBW_SETTINGS.indexOf(self.TAB_GENERAL), "General")
         self.GBX_GEN_APPEARANCE.setTitle("Appearance")
         self.GBX_GEN_PRESETS.setTitle("Presets")
-        self.CBX_GEN_ALWAYS_ON_TOP.setText("Always on top")
+        self.CHK_GEN_ALWAYS_ON_TOP.setText("Always on top")
+        self.CHK_GEN_USE_SUGGESTED.setText("Automatically use suggested participant")
+        self.CHK_CNTT_ENABLECBXSCROLL.setText("Change participant when scrolling through field")
         self.BTN_GEN_IMPORT.setToolTip("Import a preset")
         self.BTN_GEN_MODIFY.setToolTip("Modify this preset")
         self.BTN_GEN_REMOVE.setToolTip("Remove this preset from this list")
@@ -2355,6 +2406,11 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.BTN_MEM_SAVE.clicked.connect(lambda: MEM.saveMemberList())
         self.BTN_MEM_IMPORT.clicked.connect(lambda: MEM.importMemberList())
         self.BTN_MEM_EXPORT.clicked.connect(lambda: MEM.exportMemberList())
+
+
+        ## Exceptions
+        self.CHK_CNTT_USEWIDESCR.setEnabled(False)
+        self.CHK_GEN_ALWAYS_ON_TOP.setEnabled(False)
 
 
     def keyPressEvent(self, event):
@@ -2488,7 +2544,7 @@ class Members(object):
     """
     def __init__(self):
         self.DUPLICATE_THRESHOLD = 0.85                                     ## Sets how sensitive is the duplicate scanner
-        self.ITEMS_THRESHOLD = 7                                           ## Number of names to be allowed for exporting a member list
+        self.ITEMS_THRESHOLD = 7                                            ## Number of names to be allowed for exporting a member list
         self.SEARCH_STATE = False
         self.LAST_INPUT = ''
         self.SAVE_STATE = True
@@ -2497,11 +2553,11 @@ class Members(object):
     def setup(self):
         UIB.LST_MEM_MEMBERS.clear()
         UIB.LST_MEM_MEMBERS.addItems(DCFG["POOL"]["NAMES"])
-        self.CURRENT_MEMBERS = self.getMembers()
+        self.CACHED_MEMBERS = self.getCurrentMembers()
         self.generalRefresh()
 
 
-    def getMembers(self, lowercase=False):
+    def getCurrentMembers(self, lowercase=False):
         """
         Returns a string names of members from the list widget
         """
@@ -2519,14 +2575,14 @@ class Members(object):
         if len(UIB.LNE_MEM_SEARCHADD.text()) < len(self.LAST_INPUT):
             self.SEARCH_STATE = True
             UIB.LST_MEM_MEMBERS.clear()
-            UIB.LST_MEM_MEMBERS.addItems(self.CURRENT_MEMBERS)
+            UIB.LST_MEM_MEMBERS.addItems(self.CACHED_MEMBERS)
 
         if UIB.LNE_MEM_SEARCHADD.text() != '':
             UIB.BTN_MEM_ADD.setEnabled(True)
             self.SEARCH_STATE = True
             self.filterItems()
 
-        if UIB.LNE_MEM_SEARCHADD.text() == '':
+        if not len(re.sub(r"[^A-Za-z]+", '', UIB.LNE_MEM_SEARCHADD.text())):
             UIB.BTN_MEM_ADD.setEnabled(False)
             self.SEARCH_STATE = False
         
@@ -2535,7 +2591,7 @@ class Members(object):
     
     def filterItems(self):
         INPUT = re.sub(r"[^A-Za-z]+", '', UIB.LNE_MEM_SEARCHADD.text().lower())                             ## Use RegEx to filter out non-alphabet characters
-        OUTPUT = [n for n in self.CURRENT_MEMBERS if INPUT in re.sub(r"[^A-Za-z]+", '', n.lower())]
+        OUTPUT = [n for n in self.CACHED_MEMBERS if INPUT in re.sub(r"[^A-Za-z]+", '', n.lower())]
         UIB.LST_MEM_MEMBERS.clear()
         UIB.LST_MEM_MEMBERS.addItems(OUTPUT)
         UIB.LST_MEM_MEMBERS.sortItems()
@@ -2543,7 +2599,8 @@ class Members(object):
         self.refreshButtons()
     
 
-    def hasDuplicateName(self, name:str, renaming=None): return True if len(self.getSimilarNames(name, renaming)) else False
+    def hasDuplicateName(self, name:str, renaming=None):
+        return True if len(self.getSimilarNames(name, renaming)) else False
 
 
     def getSimilarNames(self, name:str, renaming=None):    
@@ -2551,7 +2608,7 @@ class Members(object):
         Uses Levenshtein Ratio method to determine the similarity
         of the existing names vs the proposed name entry
         """
-        MEMBERS = self.CURRENT_MEMBERS
+        MEMBERS = self.CACHED_MEMBERS
         if renaming is not None: MEMBERS.remove(renaming) 
         return [n for n in MEMBERS if lev.ratio(n.lower(), name.lower()) > self.DUPLICATE_THRESHOLD]
         
@@ -2585,10 +2642,27 @@ class Members(object):
             MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
             MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
             MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
-            MSG_BOX.setText(f"The list only contains {len(self.getMembers())} member(s)\nDo you still want to continue?")
+            MSG_BOX.setText(f"The list only contains {len(self.getCurrentMembers())} member(s)\nDo you still want to continue?")
             MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
 
         return MSG_BOX
+
+
+    def adjustNameFormat(self, name:str):
+        """
+        Reformats the name string into a presentable name:
+
+        • Auto-capitalizes name
+        • Auto-fill period after "Bro" or "Sis"
+        """
+        NAME = ' '.join(f"{c[0].upper()}{c[1:].lower()}" for c in name.split())                 ## Convert into Name Case which auto-capitalizes first letter of every word
+        try:
+            if NAME.split()[0].lower()[:3] in ['bro', 'sis', 'ptr'] and NAME.split()[0].lower() not in ['brother', 'sister', 'pastor']:
+                if NAME.split()[0][-1] != '.':
+                    NAME = f"{NAME.split()[0]}. {' '.join(map(str, NAME.split()[1:]))}"
+        except IndexError:                                                                      ## Handler for blank field
+            pass
+        return NAME
 
 
     def addNewMember(self):
@@ -2596,19 +2670,20 @@ class Members(object):
         Inserts new item using the text from search bar
         Also checks for duplicate and similar member names
         """
+        if not UIB.BTN_MEM_ADD.isEnabled(): return
         ## Check for duplicate
         PROPOSED = UIB.LNE_MEM_SEARCHADD.text().strip()
-        if PROPOSED.lower() in map(lambda i: i.lower().strip(), self.CURRENT_MEMBERS):
+        if PROPOSED.lower() in map(lambda i: i.lower().strip(), self.CACHED_MEMBERS):
             self.displayDialog(0, self.getSimilarNames(PROPOSED), PROPOSED).exec_(); return
 
         elif self.hasDuplicateName(PROPOSED):
             if self.displayDialog(1, self.getSimilarNames(PROPOSED)).exec_() != QtWidgets.QMessageBox.Yes: return
 
         UIB.LNE_MEM_SEARCHADD.clear()
-        UIB.LST_MEM_MEMBERS.addItem(PROPOSED)
+        UIB.LST_MEM_MEMBERS.addItem(self.adjustNameFormat(PROPOSED))
         UIB.LST_MEM_MEMBERS.sortItems()
-        self.CURRENT_MEMBERS = self.getMembers()
-        UIB.LST_MEM_MEMBERS.findItems(PROPOSED, QtCore.Qt.MatchExactly)[0].setSelected(True)
+        self.CACHED_MEMBERS = self.getCurrentMembers()
+        UIB.LST_MEM_MEMBERS.findItems(self.adjustNameFormat(PROPOSED), QtCore.Qt.MatchExactly)[0].setSelected(True)
         self.SAVE_STATE = False
         self.generalRefresh()
 
@@ -2631,7 +2706,7 @@ class Members(object):
                 SPC_V1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
                 SPC_V2 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
                 self.LNE_RENAME = QtWidgets.QLineEdit(self); self.LNE_RENAME.setObjectName("LNE_RENAME")
-                self.LNE_RENAME.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. ]+")))
+                self.LNE_RENAME.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. -]+")))
                 self.BTN_BOX = QtWidgets.QDialogButtonBox(self); self.BTN_BOX.setObjectName("BTN_BOX")
                 self.BTN_BOX.setStandardButtons(QtWidgets.QDialogButtonBox.Cancel|QtWidgets.QDialogButtonBox.Ok)
 
@@ -2655,14 +2730,14 @@ class Members(object):
                     if NEW_NAME.lower() == OLD_NAME.lower():
                         self.hide()
 
-                    elif NEW_NAME.lower() in MEM.getMembers(True):
+                    elif NEW_NAME.lower() in MEM.getCurrentMembers(True):
                         MEM.displayDialog(0, MEM.getSimilarNames(NEW_NAME), NEW_NAME).exec_(); return
 
                     elif MEM.hasDuplicateName(NEW_NAME, OLD_NAME):
                         if MEM.displayDialog(1, MEM.getSimilarNames(NEW_NAME)).exec_() != QtWidgets.QMessageBox.Yes: return     
 
-                    UIB.LST_MEM_MEMBERS.selectedItems()[0].setText(NEW_NAME)
-                    MEM.CURRENT_MEMBERS = MEM.getMembers()         
+                    UIB.LST_MEM_MEMBERS.selectedItems()[0].setText(MEM.adjustNameFormat(NEW_NAME))
+                    MEM.CACHED_MEMBERS = MEM.getCurrentMembers()         
                 self.hide()      
 
             def reject(self):
@@ -2678,7 +2753,7 @@ class Members(object):
         for i in UIB.LST_MEM_MEMBERS.selectedItems():
             UIB.LST_MEM_MEMBERS.takeItem(UIB.LST_MEM_MEMBERS.row(i))
 
-        self.CURRENT_MEMBERS = self.getMembers()
+        self.CACHED_MEMBERS = self.getCurrentMembers()
         self.SAVE_STATE = False
         self.generalRefresh()
 
@@ -2698,7 +2773,7 @@ class Members(object):
 
 
     def searchClicked(self, event):
-        UIB.BTN_MEM_ADD.setEnabled(True if len(self.CURRENT_MEMBERS) and UIB.LNE_MEM_SEARCHADD.text() != '' else False)
+        UIB.BTN_MEM_ADD.setEnabled(True if len(self.CACHED_MEMBERS) and len(re.sub(r"[^A-Za-z]+", '', UIB.LNE_MEM_SEARCHADD.text())) else False) 
 
 
     def generalRefresh(self):
@@ -2721,19 +2796,19 @@ class Members(object):
             UIB.BTN_MEM_REMOVE.setEnabled(False); UIB.BTN_MEM_REMOVE.setToolTip('')
             UIB.BTN_MEM_EDIT.setEnabled(False); UIB.BTN_MEM_EDIT.setToolTip('')
 
-        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getMembers()) and not self.SEARCH_STATE else False)
-        UIB.BTN_MEM_SAVE.setEnabled(True if len(self.getMembers()) and not self.SAVE_STATE else False)
+        UIB.BTN_MEM_EXPORT.setEnabled(True if len(self.getCurrentMembers()) and not self.SEARCH_STATE else False)
+        UIB.BTN_MEM_SAVE.setEnabled(True if len(self.getCurrentMembers()) and not self.SAVE_STATE else False)
     
 
     def refreshDetails(self):
         """
         Refreshes the details tab 
         """
-        ITEMS = self.CURRENT_MEMBERS
-        DATA = [len(self.CURRENT_MEMBERS), 0, 0, 0]                                                                   ## Members, Men, Women, Others
+        ITEMS = self.CACHED_MEMBERS
+        DATA = [len(self.CACHED_MEMBERS), 0, 0, 0]                                                                   ## Members, Men, Women, Others
 
-        DATA[1] = len(list(filter(re.compile("(?i)^bro[. ]").match, ITEMS)))
-        DATA[2] = len(list(filter(re.compile("(?i)^sis[. ]").match, ITEMS)))
+        DATA[1] = len(list(filter(re.compile("(?i)^bro[. ]|brother").match, ITEMS)))
+        DATA[2] = len(list(filter(re.compile("(?i)^sis[. ]|sister").match, ITEMS)))
         DATA[3] = DATA[0] - (DATA[1] + DATA[2])
 
         UIB.LBL_DET_MEMBERS.setEnabled(True if DATA[0] else False)
@@ -2749,12 +2824,16 @@ class Members(object):
             UIB.LBL_DET_OTHERS.clear()
             return
 
-        
         UIB.LNE_MEM_SEARCHADD.setPlaceholderText('Search or type to add new member')
-        UIB.LBL_DET_MEMBERS.setText(f"Members: {DATA[0]}")
-        UIB.LBL_DET_MEN.setText(f'Men: ' + (f"{DATA[1]} <font color={QSS.TXT_DISABLED}>({round((DATA[1]*100)/DATA[0])}%)</font>" if DATA[1] else '...'))
-        UIB.LBL_DET_WOMEN.setText(f'Women: ' + (f"{DATA[2]} <font color={QSS.TXT_DISABLED}>({round((DATA[2]*100)/DATA[0])}%)</font>" if DATA[2] else '...'))
-        UIB.LBL_DET_OTHERS.setText(f'Others: ' + (f"{DATA[3]} <font color={QSS.TXT_DISABLED}>({round((DATA[3]*100)/DATA[0])}%)</font>" if DATA[3] else '...'))
+        UIB.LBL_DET_MEMBERS.setText(f"Members: <b>{DATA[0]}</b>")
+
+        PLOT = {
+            UIB.LBL_DET_MEN: ("Men", DATA[1]),
+            UIB.LBL_DET_WOMEN: ("Women", DATA[2]),
+            UIB.LBL_DET_OTHERS: ("Others", DATA[3])
+        }
+        for k,v in PLOT.items():
+            k.setText(f'{v[0]}: ' + (f"<b>{v[1]}</b> <font color={QSS.TXT_DISABLED}>({round((v[1]*100)/DATA[0])}%)</font>" if v[1] else '...'))
         
 
     def importMemberList(self):
@@ -2786,10 +2865,10 @@ class Members(object):
         """
         Export current values into a encrypted JSON file
         """
-        if len(self.CURRENT_MEMBERS) < self.ITEMS_THRESHOLD:
+        if len(self.CACHED_MEMBERS) < self.ITEMS_THRESHOLD:
             if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
 
-        MEMBERS = {"MEMBER_LIST": self.CURRENT_MEMBERS, "DATE_GENERATED": time.time()}
+        MEMBERS = {"MEMBER_LIST": self.CACHED_MEMBERS, "DATE_GENERATED": time.time()}
         MEMBERS = json.dumps(MEMBERS, indent=None, sort_keys=True)
         
         FILE, EXT = QtWidgets.QFileDialog.getSaveFileName(None, "Export Member List", PKG.DIR_EXPORT_MEMLIST, "*.prt")
@@ -2813,10 +2892,10 @@ class Members(object):
         """
         Saves the current member list
         """
-        if len(self.CURRENT_MEMBERS) < self.ITEMS_THRESHOLD and not bypassDialog:
+        if len(self.CACHED_MEMBERS) < self.ITEMS_THRESHOLD and not bypassDialog:
             if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
             
-        DCFG['POOL'].update({"NAMES": self.CURRENT_MEMBERS})
+        DCFG['POOL'].update({"NAMES": self.CACHED_MEMBERS})
         PDB.dump()
         self.SAVE_STATE = True
         LOG.info(f"Member list was successfully saved.")
@@ -2843,7 +2922,7 @@ if __name__ == '__main__':
     APP = QtWidgets.QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
-    SW = KSoftware("Participants", "1.0.4", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Release")
+    SW = KSoftware("Participants", "1.0.8", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Release")
     LOG = KLog(System().DIR_LOG, __file__, SW.LOG_NAME_DATE(), SW.PY_NAME, SW.AUTHOR, cont=True, tms=True, delete_existing=True, tmsformat="%H:%M:%S.%f %m/%d/%y")
 
     SYS = System()
@@ -2855,6 +2934,7 @@ if __name__ == '__main__':
     RLS = DCFG['POOL']['ROLES']
     NMS = DCFG['POOL']['NAMES']
 
+    LOG.info('Initializing Internal Classes')
     QSS = Stylesheet()
     PKG = Package()
     FLD = Fields()
@@ -2864,7 +2944,7 @@ if __name__ == '__main__':
     STT = Settings()
     MEM = Members()
 
-    LOG.info('Initializing UIA')
+    LOG.info('Initializing UI')
     UIA = QWGT_PARTICIPANTS()
     UIB = QWGT_SETTINGS()
     
