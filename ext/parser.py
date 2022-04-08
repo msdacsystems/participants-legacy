@@ -1,9 +1,19 @@
 """
-Participant Parser
+Participant Parser v1.0 BETA
 
+An extension program for MSDACSYS Participants
+
+(c) 2022-present Verdadero, Ycong
 """
 
-import re, sys, os
+## Needs improvement
+##
+## • Take note of the two-line (2) participant that should be included
+## • Ignore the second name after the first tag with "@" — Assuming that the first name entry is already the participant
+## • Ignore the parentheses in the first name
+## • When converting to name case, ignore the non-alphabet capitalization such as double-quotes and make the 2nd character the capital instead.
+
+import re, sys
 
 class ParticipantParser(object):
     def __init__(self):
@@ -39,14 +49,15 @@ class ParticipantParser(object):
         return ' '.join(out)
     
 
-    def parse(self):
+    def parse(self, source=None):
         """
         Returns a tuple of participants with its ROLE and NAME
         """
         RESULT = []
+        SOURCE = self.getMessage() if source is None else source
 
         ## Strip lines
-        CLEAN = '\n'.join([line.strip() for line in self.getMessage().splitlines()])                                ## Strips the spaces for both ends of the string
+        CLEAN = '\n'.join([line.strip() for line in SOURCE.splitlines()])                                           ## Strips the spaces for both ends of the string
 
         ## Distinguish roles and names
         for i, line in enumerate(CLEAN.splitlines()):
@@ -67,10 +78,13 @@ class ParticipantParser(object):
         return RESULT
     
     
-    def showResult(self, out=sys.stdout):
-        for i in self.parse():
+    def showResult(self, source=None, out=sys.stdout):
+        for i in self.parse() if source is None else source:
             print(f"{i[0]}: {i[1]}", file=out)
 
 
-PARSER = ParticipantParser()
-PARSER.showResult()
+
+if __name__ == '__main__':
+    PARSER = ParticipantParser()
+    PARSER.parse()
+    # PARSER.showResult()

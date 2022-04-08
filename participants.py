@@ -36,11 +36,19 @@ Made with Qt, KV
 import sys
 
 try:
-    import os, psutil, winreg, time, datetime, json, shutil, gc, re, bz2
+    import os, psutil, winreg, time, datetime, json, shutil, gc, re, bz2, pyperclip
     import Levenshtein as lev
     from PyQt5 import QtCore, QtGui, QtWidgets
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QFont
+    from PyQt5.QtCore import Qt, QRegExp
+    from PyQt5.QtGui import QFont, QPixmap, QImageReader, QIcon, QRegExpValidator
+    from PyQt5.QtWidgets import (
+        QMessageBox, QComboBox, QSizePolicy, QLabel, QFontComboBox, QLineEdit,
+        QSpacerItem, QPushButton, QFileDialog, QGridLayout, QVBoxLayout, QListWidget,
+        QGroupBox, QCheckBox, QTabWidget, QFrame, QMainWindow, QWidget, QApplication,
+        QPlainTextEdit, QHBoxLayout
+        )
+    from functools import partial
+    from ext.parser import ParticipantParser
     from pptx import Presentation
     from pptx.util import Inches, Cm, Pt
     from pptx.enum.text import PP_ALIGN
@@ -93,7 +101,7 @@ class System(object):
         self.PROCESS =              psutil.Process(os.getpid())                                                             ## Get PID to detect multiple instances
         self.LOG_FILE_LIMIT =       10                                                                                      ## Maximum threshold for maintaining log files
         self.STARTUP_TIME =         0                                                                                       ## Set initial time for launching the program
-        self.GLOBAL_STATE =         1                                                                                       ## 0 - Starting (unused), 1 - Ready, 2 - Reserved, 3 - Shutting Down
+        self.GLOBAL_STATE =         0                                                                                       ## 0 - Starting (unused), 1 - Ready, 2 - Reserved, 3 - Shutting Down
         self.EXT_MEMLIST =          "prt"                                                                                   ## Application Extension for Memberlist
 
 
@@ -126,7 +134,7 @@ class System(object):
 
         for DIR, NAME in DIRECTORIES.items():
             if not KPath.exists(DIR, True):
-                LOG.warn(f"{NAME} Directory \"{DIR}\" doesn't exist. Creating a new folder.")
+                LOG.warn(f"{NAME} Directory \"{DIR}\" does not exist. Creating a new folder.")
                 MISSING += 1
         
 
@@ -145,9 +153,9 @@ class System(object):
         except FileNotFoundError:
             # No MS Office Installed/Detected
             LOG.crit("Microsoft Office is not installed or detected")
-            MSG_BOX = QtWidgets.QMessageBox()
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Critical)
+            MSG_BOX = QMessageBox()
+            MSG_BOX.setStandardButtons(QMessageBox.Ok)
+            MSG_BOX.setIcon(QMessageBox.Critical)
             MSG_BOX.setText("Microsoft Office is not installed or detected.\nThis program uses Office PowerPoint to run properly.\n")
             MSG_BOX.setDetailedText("If you think this is a mistake, please contact the developers for further assistance.\n\nhttps://m.me/verdaderoken\nhttps://m.me/reynald.ycong")
             MSG_BOX.setWindowTitle(f"{SW.NAME} - Error")
@@ -168,9 +176,9 @@ class System(object):
         DUPLICATES = list(filter(lambda x: x == SYS.PROCESS_NAME, [i.name() for i in psutil.process_iter()]))
         
         if len(DUPLICATES) > 2:
-            MSG_BOX = QtWidgets.QMessageBox()
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
+            MSG_BOX = QMessageBox()
+            MSG_BOX.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            MSG_BOX.setIcon(QMessageBox.Question)
             MSG_BOX.setText("The program is already running.\nDo you want to open another instance?")
             MSG_BOX.setWindowTitle("Duplicate Instance Detected")
             MSG_BOX.setWindowFlags(Qt.Drawer | Qt.WindowStaysOnTopHint)
@@ -179,7 +187,7 @@ class System(object):
             
             LOG.info("Duplicate Instance Detected")
             RET = MSG_BOX.exec_()
-            if RET == QtWidgets.QMessageBox.Yes:
+            if RET == QMessageBox.Yes:
                 return
             else:
                 LOG.sys("Program terminated by user.")
@@ -552,6 +560,39 @@ class Stylesheet(object):
                 QPushButton::disabled#BTN_PLAINTEXT {{
                     image: url('./res/icons/plaintext_disabled.png');
                 }}
+
+
+
+
+                /* Participant Parser */ 
+                QPushButton#BTN_PARSELIST {{
+                    background-color: none;
+                    border: none;
+                    image: url('./res/icons/parse.png');
+                }}
+
+                QPushButton::hover#BTN_PARSELIST {{
+                    image: url('./res/icons/parse_hover.png');
+                }}
+
+                QPushButton::disabled#BTN_PARSELIST {{
+                    image: url('./res/icons/parse_disabled.png');
+                }}
+
+                QPushButton#BTN_COPY_ROLE, QPushButton#BTN_COPY_NAME {{
+                    background-color: none;
+                    border: none;
+                    image: url('./res/icons/copy.png');
+                }}
+
+                QPushButton::hover#BTN_COPY_ROLE, QPushButton::hover#BTN_COPY_NAME {{
+                    image: url('./res/icons/copy_hover.png');
+                }}
+
+                QPushButton::disabled#BTN_COPY_ROLE, QPushButton::disabled#BTN_COPY_NAME {{
+                    image: url('./res/icons/copy_disabled.png');
+                }}
+
 
 
 
@@ -1025,7 +1066,7 @@ class Stylesheet(object):
 
 class Package(object):
     """
-    Represents a single package of configuration for a generated PowerPoint
+    Represents a single multi-purpose package of configuration for MSDAC Participants
     """
     def __init__(self):
         self.setupDefaultVariables()
@@ -1044,6 +1085,7 @@ class Package(object):
         Initiates all default variables before loading the user-customized values
         Works as a placeholder incase something went wrong from user data (JSON)
         """
+        ## Main PPT Package
         self.DEF_DIR_EXPORT_RECENT = SW.DIR_CWD
         self.DIR_EXPORT_RECENT = SW.DIR_CWD
         self.DIR_EXPORT_MEMLIST = os.path.expanduser('~\Desktop')
@@ -1064,6 +1106,11 @@ class Package(object):
         self.FSZ_TITLE = Pt(40)
         self.FSZ_SUBTITLE = Pt(30)
         self.FSZ_DATE = Pt(15)
+
+        ## Config
+        self.ALWAYS_ON_TOP = False
+        self.SPLIT_DIVINE = False
+        self.PRES_DISPDATE = True
         
 
     def loadConfig(self):
@@ -1083,7 +1130,10 @@ class Package(object):
             (self.TXT_SUBTITLE, "TXT_SUBTITLE"),
             (self.DIR_EXPORT_RECENT, "DIR_EXPORT_RECENT"),
             (self.DIR_IMPORT_MEMLIST, "DIR_IMPORT_MEMLIST"),
-            (self.DIR_EXPORT_MEMLIST, "DIR_EXPORT_MEMLIST")
+            (self.DIR_EXPORT_MEMLIST, "DIR_EXPORT_MEMLIST"),
+            (self.ALWAYS_ON_TOP, "ALWAYS_ON_TOP"),
+            (self.SPLIT_DIVINE, "SPLIT_DIVINE"),
+            (self.PRES_DISPDATE, "PRES_DISPDATE"),
         ]
         for obj in LOAD:
             try:
@@ -1112,8 +1162,8 @@ class Core(object):
         Relocates the specific UI from argument to center of the screen
         """
         FRM_GEOMETRY = ui.frameGeometry()
-        SCREEN = QtWidgets.QApplication.desktop().screenNumber(QtWidgets.QApplication.desktop().cursor().pos())
-        FRM_GEOMETRY.moveCenter(QtWidgets.QApplication.desktop().screenGeometry(SCREEN).center())
+        SCREEN = QApplication.desktop().screenNumber(QApplication.desktop().cursor().pos())
+        FRM_GEOMETRY.moveCenter(QApplication.desktop().screenGeometry(SCREEN).center())
         ui.move(FRM_GEOMETRY.topLeft())
 
 
@@ -1148,8 +1198,8 @@ class Core(object):
         """
         Return the role string to a presentable format
         """
-        return ' '.join(map(str, [f"{w[:1].upper()}{w[1:].lower()}" if w.lower() not in
-                self.IGNORED_CASE else w.lower() for w in role.split()]))
+        return ' '.join(map(str, [f"{w[:1].upper()}{w[1:].lower()}" if w.lower() not in self.IGNORED_CASE
+                else w.lower() if i else f"{w[:1].upper()}{w[1:].lower()}" for i, w in enumerate(role.split())]))
 
 
 
@@ -1443,7 +1493,7 @@ class Fields(object):
         self.FIELDS = FDS+1
 
         ## Fills the placeholder with objects (for Role, Name, Add, and Clear/Remove button) 
-        self.CBX_RLS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL); self.CBX_RLS[pos].setObjectName(f"CBX_RLS")
+        self.CBX_RLS[pos] = QComboBox(UIA.WGT_CENTRAL); self.CBX_RLS[pos].setObjectName(f"CBX_RLS")
         self.CBX_RLS[pos].view().window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.CBX_RLS[pos].view().window().setAttribute(Qt.WA_TranslucentBackground)
         self.CBX_RLS[pos].setMinimumWidth(140); self.CBX_RLS[pos].setMaximumWidth(200)
@@ -1453,7 +1503,7 @@ class Fields(object):
         self.CBX_RLS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
         self.CBX_RLS[pos].wheelEvent = lambda e: self.ignoreWheel(e)
 
-        self.CBX_NMS[pos] = QtWidgets.QComboBox(UIA.WGT_CENTRAL); self.CBX_NMS[pos].setObjectName(f"CBX_NMS")
+        self.CBX_NMS[pos] = QComboBox(UIA.WGT_CENTRAL); self.CBX_NMS[pos].setObjectName(f"CBX_NMS")
         self.CBX_NMS[pos].view().window().setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.CBX_NMS[pos].view().window().setAttribute(Qt.WA_TranslucentBackground)
         self.CBX_NMS[pos].setMinimumWidth(140); self.CBX_NMS[pos].setMaximumWidth(200)
@@ -1463,17 +1513,17 @@ class Fields(object):
         self.CBX_NMS[pos].setMaxVisibleItems(self.MAX_VISIBLE_ITEMS)
         self.CBX_NMS[pos].wheelEvent = lambda e: self.ignoreWheel(e)
 
-        self.BTN_ATVS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
+        self.BTN_ATVS[pos] = QPushButton(UIA.WGT_CENTRAL); self.BTN_ATVS[pos].setObjectName(f"BTN_ATVS")
         self.BTN_ATVS[pos].setMaximumWidth(25);        self.BTN_ATVS[pos].setMinimumHeight(30)
         self.BTN_ATVS[pos].setToolTip(self.TTIP_BTN_ATVS)
         self.BTN_ATVS[pos].setFocusPolicy(Qt.ClickFocus)
 
-        self.BTN_INSS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
+        self.BTN_INSS[pos] = QPushButton(UIA.WGT_CENTRAL); self.BTN_INSS[pos].setObjectName(f"BTN_INSS")
         self.BTN_INSS[pos].setMaximumWidth(26); self.BTN_INSS[pos].setMinimumHeight(30)
         self.BTN_INSS[pos].setToolTip(self.TTIP_BTN_INSS)
         self.BTN_INSS[pos].setFocusPolicy(Qt.ClickFocus)
 
-        self.BTN_REMS[pos] = QtWidgets.QPushButton(UIA.WGT_CENTRAL); self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
+        self.BTN_REMS[pos] = QPushButton(UIA.WGT_CENTRAL); self.BTN_REMS[pos].setObjectName(f"BTN_REMS")
         self.BTN_REMS[pos].setMaximumWidth(25); self.BTN_REMS[pos].setMinimumHeight(30)
         self.BTN_REMS[pos].setToolTip(self.TTIP_BTN_REMS)
         self.BTN_REMS[pos].setFocusPolicy(Qt.ClickFocus)
@@ -1617,14 +1667,14 @@ class Fields(object):
         return ROLES, NAMES, DICT
 
     
-    def checkKeyPress(self, e):
+    def checkKeyPress(self, c):                                                                 ## C is the increment value
         """
         Handles forwarded KeyPressEvent from UIA for field switching via Enter|Return key
         """
         TGT = self.CBX_NMS if self.PREV_CBX[0] else self.CBX_RLS
         for i, cbx in enumerate(TGT):
             if not cbx.hasFocus(): continue
-            TGT[i+1 if i+1 != len(TGT) else 0].setFocus()
+            TGT[i+c if i+c != len(TGT) else 0].setFocus()
             break
 
 
@@ -1660,7 +1710,7 @@ class Export(object):
         """
         RLS, NMS, DCT = FLD.getFieldData()
         
-        DIR_TGT = QtWidgets.QFileDialog.getExistingDirectory(None, "Select Folder", PKG.DIR_EXPORT_RECENT)
+        DIR_TGT = QFileDialog.getExistingDirectory(None, "Select Folder", PKG.DIR_EXPORT_RECENT)
         if DIR_TGT:
             LOG.info(f"Saving file to {DIR_TGT}")
             try:
@@ -1687,12 +1737,141 @@ class Export(object):
         """
         Export data to a Powerpoint file
         """
+        # class PresBlueprint(self)
+        def moveSlide(presentation, old_index, new_index):
+            xml_slides = presentation.slides._sldIdLst  # pylint: disable=W0212
+            slides = list(xml_slides)
+            xml_slides.remove(slides[old_index])
+            xml_slides.insert(new_index, slides[old_index])
+        
+        def splitDivine(self):
+            """
+            Splits the whole participant into two parts:
+            Sabbath School and Divine Service
+            """
+            ## Service-based Splitter
+            RLS, NMS, DCT = FLD.getFieldData()
+            SPLITTED = CORE.splitContents('\n'.join([f"{r}:" for r in RLS]), '\n'.join(NMS))
+            ID = [0,1], [2,3]
+            TITLES = ['Sabbath School Participants', 'Divine Service Participants']
+
+            for i in range(2):
+                SLD_MAIN = self.PRS.slides.add_slide(self.PRS.slide_layouts[6])
+                SLD_MAIN.shapes.add_picture(PKG.IMG_BACKGROUND, 0, 0, self.PRS.slide_width, self.PRS.slide_height) # Left-Top-Width-Height
+
+                ## Textboxes
+                ## Title
+                TBX_TITLE = SLD_MAIN.shapes.add_textbox(0, Cm(1), self.PRS.slide_width, Cm(4))
+                FRM_TITLE = TBX_TITLE.text_frame
+
+                PARA_TITLE = FRM_TITLE.paragraphs[0]
+                PARA_TITLE.text = TITLES[i]
+                PARA_TITLE.font.size = PKG.FSZ_TITLE
+                PARA_TITLE.font.color.rgb = PKG.RGB_TITLE
+                PARA_TITLE.alignment = PP_ALIGN.CENTER
+                PARA_TITLE.font.name = PKG.FONT_TITLE
+                PARA_TITLE.font.italic = True
+
+                ## Subtitle
+                TBX_SUBTITLE = SLD_MAIN.shapes.add_textbox(0, Cm(3), self.PRS.slide_width, Cm(4))
+                FRM_SUBTITLE = TBX_SUBTITLE.text_frame
+                PARA_SUBTITLE = FRM_SUBTITLE.paragraphs[0]
+                PARA_SUBTITLE.text = PKG.TXT_SUBTITLE
+                PARA_SUBTITLE.font.size = PKG.FSZ_SUBTITLE
+                PARA_SUBTITLE.font.color.rgb = PKG.RGB_SUBTITLE
+                PARA_SUBTITLE.alignment = PP_ALIGN.CENTER
+                PARA_SUBTITLE.font.name = PKG.FONT_SUBTITLE
+
+                ## Date
+                if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+                    TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
+                    FRM_DATE = TBX_DATE.text_frame
+                    PARA_DATE = FRM_DATE.paragraphs[0]
+                    PARA_DATE.text = f"——— {datetime.datetime.now().strftime('%B %d, %Y')} ———"
+                    PARA_DATE.font.size = PKG.FSZ_DATE
+                    PARA_DATE.font.color.rgb = PKG.RGB_DATE
+                    PARA_DATE.alignment = PP_ALIGN.CENTER
+                    PARA_DATE.font.name = PKG.FONT_DATE
+
+                ## Paragraph
+                left, top, width, height = 0, Cm(5.4), int(self.PRS.slide_width / 2), int(self.PRS.slide_height) - Cm(2)
+                PARA_FNTSZ = Pt(39-len(SPLITTED[ID[i][0]]))
+
+                ## Roles
+                TBX_ROLES = SLD_MAIN.shapes.add_textbox(left, top, width, height)
+                FRM_ROLES = TBX_ROLES.text_frame
+
+                PARA_RLS = FRM_ROLES.paragraphs[0]
+                PARA_RLS.text = '\n'.join(SPLITTED[ID[i][0]])
+                PARA_RLS.font.size = PARA_FNTSZ
+                PARA_RLS.font.color.rgb = PKG.RGB_ROLES
+                PARA_RLS.alignment = PP_ALIGN.RIGHT
+                PARA_RLS.font.name = PKG.FONT_CONTENT
+                PARA_RLS.font.italic = True
+
+                ## Names
+                TBX_NAMES = SLD_MAIN.shapes.add_textbox(int(self.PRS.slide_width / 2), top, width, height)
+                FRM_NAMES = TBX_NAMES.text_frame
+
+                PARA_NMS = FRM_NAMES.paragraphs[0]
+                PARA_NMS.text = '\n'.join(SPLITTED[ID[i][1]])
+                PARA_NMS.font.size = PARA_FNTSZ
+                PARA_NMS.font.color.rgb = PKG.RGB_NAMES
+                PARA_NMS.alignment = PP_ALIGN.LEFT
+                PARA_NMS.font.name = PKG.FONT_CONTENT
+
+
+
+        def generatePerSlide(self):
+            """
+            Generates a slide for every role and name of the participant
+            """
+            ## Roles
+            RLS, NMS, DCT = FLD.getFieldData()
+            for i, (r, n) in enumerate(zip(RLS, NMS)):
+                SLD_SUB = self.PRS.slides.add_slide(self.PRS.slide_layouts[6])
+                SLD_SUB.shapes.add_picture(PKG.IMG_BACKGROUND, 0, 0, self.PRS.slide_width, self.PRS.slide_height) # Left-Top-Width-Height
+
+                ## Sub - Name
+                TBX_NAME = SLD_SUB.shapes.add_textbox(0, Inches(3.5), self.PRS.slide_width, self.PRS.slide_height)
+                FRM_NAME = TBX_NAME.text_frame
+
+                PARA_NAME = FRM_NAME.paragraphs[0]
+                PARA_NAME.text = NMS[i]
+                PARA_NAME.font.size = Pt(72-(len(NMS[i])/1.8))
+                PARA_NAME.font.color.rgb = PKG.RGB_NAMES
+                PARA_NAME.alignment = PP_ALIGN.CENTER
+                PARA_NAME.font.name = PKG.FONT_CONTENT
+
+                ## Sub - Role
+                TBX_ROLE = SLD_SUB.shapes.add_textbox(0, Inches(4.6), self.PRS.slide_width, self.PRS.slide_height)
+                FRM_ROLE = TBX_ROLE.text_frame
+
+                PARA_ROLE = FRM_ROLE.paragraphs[0]
+                PARA_ROLE.text = RLS[i]
+                PARA_ROLE.font.size = Pt(40)
+                PARA_ROLE.font.color.rgb = PKG.RGB_SUBTITLE
+                PARA_ROLE.alignment = PP_ALIGN.CENTER
+                PARA_ROLE.font.name = PKG.FONT_CONTENT
+                PARA_ROLE.font.italic = True
+            return
+
+
         def singleColumn(self):
             RLS, NMS, DCT = FLD.getFieldData()
             self.PRS = Presentation()
 
             ## 16:9 Ratio
             self.PRS.slide_width, self.PRS.slide_height = Inches(16), Inches(9)
+            if DCFG['CONFIG']['SPLIT_DIVINE'] == True:
+                splitDivine(self)
+                generatePerSlide(self)
+                
+                RLS, NMS, DCT = FLD.getFieldData()
+                SPLITTED = CORE.splitContents('\n'.join([f"{r}:" for r in RLS]), '\n'.join(NMS))
+
+                moveSlide(self.PRS, 1, len(SPLITTED[0])+1)
+                return
 
             SLD_MAIN = self.PRS.slides.add_slide(self.PRS.slide_layouts[6])
             SLD_MAIN.shapes.add_picture(PKG.IMG_BACKGROUND, 0, 0, self.PRS.slide_width, self.PRS.slide_height) # Left-Top-Width-Height
@@ -1721,14 +1900,15 @@ class Export(object):
             PARA_SUBTITLE.font.name = PKG.FONT_SUBTITLE
 
             ## Date
-            TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
-            FRM_DATE = TBX_DATE.text_frame
-            PARA_DATE = FRM_DATE.paragraphs[0]
-            PARA_DATE.text = f"——— {datetime.datetime.now().strftime('%B %d, %Y')} ———"
-            PARA_DATE.font.size = PKG.FSZ_DATE
-            PARA_DATE.font.color.rgb = PKG.RGB_DATE
-            PARA_DATE.alignment = PP_ALIGN.CENTER
-            PARA_DATE.font.name = PKG.FONT_DATE
+            if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+                TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
+                FRM_DATE = TBX_DATE.text_frame
+                PARA_DATE = FRM_DATE.paragraphs[0]
+                PARA_DATE.text = f"——— {datetime.datetime.now().strftime('%B %d, %Y')} ———"
+                PARA_DATE.font.size = PKG.FSZ_DATE
+                PARA_DATE.font.color.rgb = PKG.RGB_DATE
+                PARA_DATE.alignment = PP_ALIGN.CENTER
+                PARA_DATE.font.name = PKG.FONT_DATE
 
 
             ## Paragraph
@@ -1757,6 +1937,8 @@ class Export(object):
             PARA_NMS.font.color.rgb = PKG.RGB_NAMES
             PARA_NMS.alignment = PP_ALIGN.LEFT
             PARA_NMS.font.name = PKG.FONT_CONTENT
+
+            generatePerSlide(self)
 
 
         def doubleColumns(self):
@@ -1814,33 +1996,33 @@ class Export(object):
 
 
             ## Date
-            TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
-            FRM_DATE = TBX_DATE.text_frame
-            PARA_DATE = FRM_DATE.paragraphs[0]
-            PARA_DATE.text = f"——— {datetime.datetime.now().strftime('%B %d, %Y')} ———"
-            PARA_DATE.font.size = PKG.FSZ_DATE
-            PARA_DATE.font.color.rgb = PKG.RGB_DATE
-            PARA_DATE.alignment = PP_ALIGN.CENTER
-            PARA_DATE.font.name = PKG.FONT_DATE
+            if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+                TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
+                FRM_DATE = TBX_DATE.text_frame
+                PARA_DATE = FRM_DATE.paragraphs[0]
+                PARA_DATE.text = f"——— {datetime.datetime.now().strftime('%B %d, %Y')} ———"
+                PARA_DATE.font.size = PKG.FSZ_DATE
+                PARA_DATE.font.color.rgb = PKG.RGB_DATE
+                PARA_DATE.alignment = PP_ALIGN.CENTER
+                PARA_DATE.font.name = PKG.FONT_DATE
 
 
             ## Paragraph
             left, top, width, height = 0, Cm(5.4), int(self.PRS.slide_width/2), int(self.PRS.slide_height) - Cm(2)
             PARA_FNTSZ = Pt(38-FLD.FIELDS)
 
+            ## Service-based Splitter
+            TXT_ROLES = '\n'.join([f"{r}:" for r in RLS])
+            TXT_NAMES = '\n'.join(NMS)
+            SPLITTED = CORE.splitContents(TXT_ROLES, TXT_NAMES)
+            
             ## Sabbath School
-            ## Roles
             TBX_ROLES = SLD_MAIN.shapes.add_textbox(0, top, width/2.2, height)
             TBX_NAMES = SLD_MAIN.shapes.add_textbox(width/2.2, top, width/2.2, height)
             FRM_ROLES = TBX_ROLES.text_frame
             FRM_NAMES = TBX_NAMES.text_frame
-            TXT_ROLES = '\n'.join([f"{r}:" for r in RLS])
-            TXT_NAMES = '\n'.join(NMS)
 
-
-            ## Service-based Splitter
-            SPLITTED = CORE.splitContents(TXT_ROLES, TXT_NAMES)
-
+            ## Roles
             PARA_RLS = FRM_ROLES.paragraphs[0]
             PARA_RLS.text = '\n'.join(SPLITTED[0])
             PARA_RLS.font.size = PARA_FNTSZ
@@ -1880,8 +2062,10 @@ class Export(object):
             PARA_NMS.font.color.rgb = PKG.RGB_NAMES
             PARA_NMS.alignment = PP_ALIGN.LEFT
             PARA_NMS.font.name = PKG.FONT_CONTENT
+            generatePerSlide(self)
         
 
+    
         ## Scan for new items that are currently not in pool
         ##
         ## NOTE: Needed to change the structure of data.json.
@@ -1891,11 +2075,11 @@ class Export(object):
 
         # NEW_NAMES = [name for name in [c.currentText() for c in FLD.CBX_NMS] if name not in DCFG['POOL']['NAMES']]
         # if len(NEW_NAMES):
-        #     MSG_BOX = QtWidgets.QMessageBox()
-        #     MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-        #     MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        #     MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
-        #     MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
+        #     MSG_BOX = QMessageBox()
+        #     MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON))
+        #     MSG_BOX.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        #     MSG_BOX.setDefaultButton(QMessageBox.No)
+        #     MSG_BOX.setIcon(QMessageBox.Question)
         #     MSG_BOX.setText("There are new participants recorded\nDo you want to add them all to your list?")
         #     MSG_BOX.setDetailedText("\n".join(map(str, NEW_NAMES)))
         #     MSG_BOX.setWindowTitle(SW.NAME)
@@ -1903,26 +2087,27 @@ class Export(object):
         #     MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
         #     RET = MSG_BOX.exec_()
 
-        #     if RET == QtWidgets.QMessageBox.Yes:
+        #     if RET == QMessageBox.Yes:
         #         p('Saved')
         #     else:
         #         p('Unsaved')
         #         return
+        
 
         START = time.time()
         LOG.info("Generating Powerpoint")
-        doubleColumns(self) if FLD.FIELDS > FLD.FIELDS_MAX/1.15 else singleColumn(self)            
+        doubleColumns(self) if FLD.FIELDS > FLD.FIELDS_MAX/1.10 else singleColumn(self)            
 
         try:
             self.PRS.save(SYS.FILE_PPT_EXPORTED)
             os.startfile(SYS.FILE_PPT_EXPORTED)
         except PermissionError as e:
             LOG.warn("PermissionError: The file is still open or is already running. Close the file first and try again.")
-            MSG_BOX = QtWidgets.QMessageBox()
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.Ok)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Warning)
+            MSG_BOX = QMessageBox()
+            MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON))
+            MSG_BOX.setStandardButtons(QMessageBox.Ok)
+            MSG_BOX.setDefaultButton(QMessageBox.Ok)
+            MSG_BOX.setIcon(QMessageBox.Warning)
             MSG_BOX.setText("The file is still open or is already running.\nIf you have changes, close the file first and try again.")
             MSG_BOX.setWindowTitle(SW.NAME)
             MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
@@ -1941,7 +2126,7 @@ class Export(object):
 
 
 
-class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
+class QWGT_PARTICIPANTS(QMainWindow):
     """
     Main user interface window for this software.
     Uses PyQt5 for handling GUI.
@@ -1949,7 +2134,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
     Alias UIA (User Interface A / Main)
     """
     def __init__(self, parent = None):
-        QtWidgets.QMainWindow.__init__(self, parent)
+        QMainWindow.__init__(self, parent)
     
 
     def setupUI(self):
@@ -1960,47 +2145,47 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.setObjectName("WIN_PARTICIPANTS")
         self.resize(0, 0)
         self.setMaximumWidth(520)
-        self.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.setWindowIcon(QIcon(SYS.RES_APP_ICON))
 
         ## Layouts
-        self.WGT_CENTRAL = QtWidgets.QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
-        self.LYT_MAIN = QtWidgets.QGridLayout(self.WGT_CENTRAL); self.LYT_MAIN.setObjectName("LYT_MAIN")
-        self.LYT_HEAD = QtWidgets.QGridLayout(); self.LYT_HEAD.setObjectName("LYT_HEAD")
-        self.LYT_BODY = QtWidgets.QGridLayout(); self.LYT_BODY.setObjectName("LYT_BODY")
-        self.LYT_FOOTER = QtWidgets.QGridLayout(); self.LYT_FOOTER.setObjectName("LYT_FOOTER")
+        self.WGT_CENTRAL = QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
+        self.LYT_MAIN = QGridLayout(self.WGT_CENTRAL); self.LYT_MAIN.setObjectName("LYT_MAIN")
+        self.LYT_HEAD = QGridLayout(); self.LYT_HEAD.setObjectName("LYT_HEAD")
+        self.LYT_BODY = QGridLayout(); self.LYT_BODY.setObjectName("LYT_BODY")
+        self.LYT_FOOTER = QGridLayout(); self.LYT_FOOTER.setObjectName("LYT_FOOTER")
 
-        self.LYT_ROLES = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_ROLES")
-        self.LYT_NAMES = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_NAMES")
-        self.LYT_CLEAR = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_CLEAR")
-        self.LYT_INSRT = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_INSRT")
-        self.LYT_ACTIV = QtWidgets.QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_ACTIV")
+        self.LYT_ROLES = QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_ROLES")
+        self.LYT_NAMES = QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_NAMES")
+        self.LYT_CLEAR = QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_CLEAR")
+        self.LYT_INSRT = QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_INSRT")
+        self.LYT_ACTIV = QVBoxLayout(); self.LYT_BODY.setObjectName("LYT_ACTIV")
         
         ## Banner
-        self.PIX_HEADER = QtWidgets.QLabel(self.WGT_CENTRAL); self.PIX_HEADER.setObjectName("PIX_HEADER"); self.PIX_HEADER.setAlignment(QtCore.Qt.AlignCenter)        
-        self.PIX_HEADER.setPixmap(QtGui.QPixmap(SYS.RES_HEADERLOGO).scaledToHeight(75, QtCore.Qt.KeepAspectRatio & Qt.SmoothTransformation))
+        self.PIX_HEADER = QLabel(self.WGT_CENTRAL); self.PIX_HEADER.setObjectName("PIX_HEADER"); self.PIX_HEADER.setAlignment(Qt.AlignCenter)        
+        self.PIX_HEADER.setPixmap(QPixmap(SYS.RES_HEADERLOGO).scaledToHeight(75, Qt.KeepAspectRatio & Qt.SmoothTransformation))
 
         ## Head
-        SPC_WINV_TOPP = QtWidgets.QSpacerItem(20, 15, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
-        SPC_TITLEV2 = QtWidgets.QSpacerItem(20, 15, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
-        self.BTN_SETTINGS = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_SETTINGS.setObjectName("BTN_SETTINGS")
-        self.BTN_SAVELIST = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_SAVELIST.setObjectName("BTN_SAVELIST")
-        SPC_HEADH1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        self.LBL_EXPORT = QtWidgets.QLabel(self.WGT_CENTRAL); self.LBL_EXPORT.setObjectName("LBL_EXPORT")
-        self.BTN_POWERPOINT = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_POWERPOINT.setObjectName("BTN_POWERPOINT")
-        self.BTN_PLAINTEXT = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_PLAINTEXT.setObjectName("BTN_PLAINTEXT")
+        SPC_WINV_TOPP = QSpacerItem(20, 15, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        SPC_TITLEV2 = QSpacerItem(20, 15, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        self.BTN_SETTINGS = QPushButton(self.WGT_CENTRAL); self.BTN_SETTINGS.setObjectName("BTN_SETTINGS")
+        self.BTN_SAVELIST = QPushButton(self.WGT_CENTRAL); self.BTN_SAVELIST.setObjectName("BTN_SAVELIST")
+        self.BTN_PARSELIST = QPushButton(self.WGT_CENTRAL); self.BTN_PARSELIST.setObjectName("BTN_PARSELIST")
+        SPC_HEADH1 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.LBL_EXPORT = QLabel(self.WGT_CENTRAL); self.LBL_EXPORT.setObjectName("LBL_EXPORT")
+        self.BTN_POWERPOINT = QPushButton(self.WGT_CENTRAL); self.BTN_POWERPOINT.setObjectName("BTN_POWERPOINT")
+        self.BTN_PLAINTEXT = QPushButton(self.WGT_CENTRAL); self.BTN_PLAINTEXT.setObjectName("BTN_PLAINTEXT")
         
         ## Body
-        SPC_BODYV1 = QtWidgets.QSpacerItem(20, 15, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
-        self.LBL_RL = QtWidgets.QLabel(self.WGT_CENTRAL); self.LBL_RL.setObjectName("LBL_RL"); self.LBL_RL.setAlignment(QtCore.Qt.AlignCenter)
-        SPC_BODYH = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        self.LBL_NM = QtWidgets.QLabel(self.WGT_CENTRAL); self.LBL_NM.setObjectName("LBL_NM"); self.LBL_NM.setAlignment(QtCore.Qt.AlignCenter)
-        SPC_BODYV2 = QtWidgets.QSpacerItem(20, 20, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Minimum)
+        SPC_BODYV1 = QSpacerItem(20, 15, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        self.LBL_RL = QLabel(self.WGT_CENTRAL); self.LBL_RL.setObjectName("LBL_RL"); self.LBL_RL.setAlignment(Qt.AlignCenter)
+        SPC_BODYH = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.LBL_NM = QLabel(self.WGT_CENTRAL); self.LBL_NM.setObjectName("LBL_NM"); self.LBL_NM.setAlignment(Qt.AlignCenter)
+        SPC_BODYV2 = QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Minimum)
         
         ## Window Spacers
-        SPC_WINH_LEFT = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        SPC_WINV_BOTM = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_WINH_RGHT = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        SPC_WINH_LEFT = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        SPC_WINV_BOTM = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_WINH_RGHT = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         ## Layering
         ## Head
@@ -2008,6 +2193,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.LYT_HEAD.addItem(SPC_TITLEV2, 2, 0, 1, 3)
         self.LYT_HEAD.addWidget(self.BTN_SETTINGS, 3, 0, 1, 1)
         self.LYT_HEAD.addWidget(self.BTN_SAVELIST, 3, 1, 1, 1)
+        self.LYT_HEAD.addWidget(self.BTN_PARSELIST, 3, 2, 1, 1)
         self.LYT_HEAD.addItem(SPC_HEADH1, 3, 3, 1, 1)
         self.LYT_HEAD.addWidget(self.LBL_EXPORT, 3, 4, 1, 1)
         self.LYT_HEAD.addWidget(self.BTN_POWERPOINT, 3, 5, 1, 1)
@@ -2067,6 +2253,7 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
         self.BTN_PLAINTEXT.clicked.connect(lambda: EXP.toPlainText())
         self.BTN_POWERPOINT.clicked.connect(lambda: EXP.toPowerpoint())
         self.BTN_SETTINGS.clicked.connect(lambda: UIB.enterWindow())
+        self.BTN_PARSELIST.clicked.connect(lambda: UIC.enterWindow())
         
 
     def updateWindowTitle(self):
@@ -2077,15 +2264,16 @@ class QWGT_PARTICIPANTS(QtWidgets.QMainWindow):
 
 
     def keyPressEvent(self, e):
-        if e.key() in (Qt.Key_Enter, Qt.Key_Return):
-            FLD.checkKeyPress(e)
-    
+        if e.modifiers() == Qt.ShiftModifier:                               ## Shift+Enter
+            if e.key() in (Qt.Key_Enter, Qt.Key_Return):                    ## ISSUE: Qt.Key_Return doesn't work with Shift Modifier
+                FLD.checkKeyPress(-1)
+        elif e.key() in (Qt.Key_Enter, Qt.Key_Return):                      ## Enter Key
+            FLD.checkKeyPress(1)
     
 
 
-
     
-class QWGT_SETTINGS(QtWidgets.QMainWindow):
+class QWGT_SETTINGS(QMainWindow):
     """
     Settings window 
     Mostly for UI-related functions only.
@@ -2093,7 +2281,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
     Alias UIB (User Interface B / Settings)
     """
     def __init__(self, parent = None):
-        QtWidgets.QWidget.__init__(self, parent)
+        QWidget.__init__(self, parent)
         self.CHANGED = False
         self.BG_SCALING = 100
 
@@ -2105,119 +2293,119 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         ## Window
         self.setObjectName("WIN_SETTINGS")
         self.setFixedSize(380, 720)
-        self.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
+        self.setWindowIcon(QIcon(SYS.RES_APP_ICON))
 
-        self.WGT_CENTRAL = QtWidgets.QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
+        self.WGT_CENTRAL = QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
         self.setCentralWidget(self.WGT_CENTRAL)
         
         ## Footer
-        self.LBL_APPVERSION = QtWidgets.QLabel(self.WGT_CENTRAL)
+        self.LBL_APPVERSION = QLabel(self.WGT_CENTRAL)
         self.LBL_APPVERSION.setEnabled(False); self.LBL_APPVERSION.setObjectName("LBL_APPVERSION")
-        self.BTN_OK = QtWidgets.QPushButton(self.WGT_CENTRAL); self.BTN_OK.setObjectName("BTN_OK")
+        self.BTN_OK = QPushButton(self.WGT_CENTRAL); self.BTN_OK.setObjectName("BTN_OK")
 
         ## Settings Main Tab
-        self.TBW_SETTINGS = QtWidgets.QTabWidget(self.WGT_CENTRAL); self.TBW_SETTINGS.setObjectName("TBW_SETTINGS")
+        self.TBW_SETTINGS = QTabWidget(self.WGT_CENTRAL); self.TBW_SETTINGS.setObjectName("TBW_SETTINGS")
 
         ## General Tab
-        self.TAB_GENERAL = QtWidgets.QWidget(); self.TAB_GENERAL.setObjectName("TAB_GENERAL")
-        self.GBX_GEN_APPEARANCE = QtWidgets.QGroupBox(self.TAB_GENERAL); self.GBX_GEN_APPEARANCE.setObjectName("GBX_GEN_APPEARANCE")
-        self.CHK_GEN_ALWAYS_ON_TOP = QtWidgets.QCheckBox(self.GBX_GEN_APPEARANCE); self.CHK_GEN_ALWAYS_ON_TOP.setObjectName("CHK_GEN_ALWAYS_ON_TOP")
-        self.CHK_GEN_USE_SUGGESTED = QtWidgets.QCheckBox(self.GBX_GEN_APPEARANCE); self.CHK_GEN_USE_SUGGESTED.setObjectName("CHK_GEN_USE_SUGGESTED")
+        self.TAB_GENERAL = QWidget(); self.TAB_GENERAL.setObjectName("TAB_GENERAL")
+        self.GBX_GEN_PREFS = QGroupBox(self.TAB_GENERAL); self.GBX_GEN_PREFS.setObjectName("GBX_GEN_PREFS")
+        self.CHK_GEN_ALWAYS_ON_TOP = QCheckBox(self.GBX_GEN_PREFS); self.CHK_GEN_ALWAYS_ON_TOP.setObjectName("CHK_GEN_ALWAYS_ON_TOP")
+        self.CHK_GEN_USE_SUGGESTED = QCheckBox(self.GBX_GEN_PREFS); self.CHK_GEN_USE_SUGGESTED.setObjectName("CHK_GEN_USE_SUGGESTED")
 
-        self.GBX_GEN_PRESETS = QtWidgets.QGroupBox(self.TAB_GENERAL); self.GBX_GEN_PRESETS.setObjectName("GBX_GEN_PRESETS")
-        self.LST_GEN_PRESETS = QtWidgets.QListWidget(self.GBX_GEN_PRESETS); self.LST_GEN_PRESETS.setObjectName("LST_GEN_PRESETS")
-        self.BTN_GEN_MODIFY = QtWidgets.QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_MODIFY.setObjectName("BTN_GEN_MODIFY")
-        self.BTN_GEN_IMPORT = QtWidgets.QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_IMPORT.setObjectName("BTN_GEN_IMPORT")
-        self.BTN_GEN_REMOVE = QtWidgets.QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_REMOVE.setObjectName("BTN_GEN_REMOVE")
+        self.GBX_GEN_PRESETS = QGroupBox(self.TAB_GENERAL); self.GBX_GEN_PRESETS.setObjectName("GBX_GEN_PRESETS")
+        self.LST_GEN_PRESETS = QListWidget(self.GBX_GEN_PRESETS); self.LST_GEN_PRESETS.setObjectName("LST_GEN_PRESETS")
+        self.BTN_GEN_MODIFY = QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_MODIFY.setObjectName("BTN_GEN_MODIFY")
+        self.BTN_GEN_IMPORT = QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_IMPORT.setObjectName("BTN_GEN_IMPORT")
+        self.BTN_GEN_REMOVE = QPushButton(self.GBX_GEN_PRESETS); self.BTN_GEN_REMOVE.setObjectName("BTN_GEN_REMOVE")
 
         ## Presentation Tab
-        self.TAB_PRESENTATION = QtWidgets.QWidget(); self.TAB_PRESENTATION.setObjectName("TAB_PRESENTATION")
+        self.TAB_PRESENTATION = QWidget(); self.TAB_PRESENTATION.setObjectName("TAB_PRESENTATION")
 
         ## Presentation - Content
-        self.GBX_PRES_CONTENT = QtWidgets.QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_CONTENT.setObjectName("GBX_PRES_CONTENT")
-        self.LBL_CNTT_TITLE = QtWidgets.QLabel(self.GBX_PRES_CONTENT); self.LBL_CNTT_TITLE.setObjectName("LBL_CNTT_TITLE"); self.LBL_CNTT_TITLE.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LNE_CNTT_TITLE = QtWidgets.QLineEdit(self.GBX_PRES_CONTENT); self.LNE_CNTT_TITLE.setObjectName("LNE_CNTT_TITLE"); self.LNE_CNTT_TITLE.setClearButtonEnabled(True)
-        self.LBL_CNTT_SUBTITLE = QtWidgets.QLabel(self.GBX_PRES_CONTENT); self.LBL_CNTT_SUBTITLE.setObjectName("LBL_CNTT_SUBTITLE"); self.LBL_CNTT_SUBTITLE.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LNE_CNTT_SUBTITLE = QtWidgets.QLineEdit(self.GBX_PRES_CONTENT); self.LNE_CNTT_SUBTITLE.setObjectName("LNE_CNTT_SUBTITLE"); self.LNE_CNTT_SUBTITLE.setClearButtonEnabled(True)
-        self.CHK_CNTT_DISPDATE = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_DISPDATE.setObjectName("CHK_CNTT_DISPDATE")
-        self.CHK_CNTT_USEWIDESCR = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_USEWIDESCR.setObjectName("CHK_CNTT_USEWIDESCR")
-        self.CHK_CNTT_ENABLECBXSCROLL = QtWidgets.QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_ENABLECBXSCROLL.setObjectName("CHK_CNTT_ENABLECBXSCROLL")
+        self.GBX_PRES_CONTENT = QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_CONTENT.setObjectName("GBX_PRES_CONTENT")
+        self.LBL_CNTT_TITLE = QLabel(self.GBX_PRES_CONTENT); self.LBL_CNTT_TITLE.setObjectName("LBL_CNTT_TITLE"); self.LBL_CNTT_TITLE.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LNE_CNTT_TITLE = QLineEdit(self.GBX_PRES_CONTENT); self.LNE_CNTT_TITLE.setObjectName("LNE_CNTT_TITLE"); self.LNE_CNTT_TITLE.setClearButtonEnabled(True)
+        self.LBL_CNTT_SUBTITLE = QLabel(self.GBX_PRES_CONTENT); self.LBL_CNTT_SUBTITLE.setObjectName("LBL_CNTT_SUBTITLE"); self.LBL_CNTT_SUBTITLE.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LNE_CNTT_SUBTITLE = QLineEdit(self.GBX_PRES_CONTENT); self.LNE_CNTT_SUBTITLE.setObjectName("LNE_CNTT_SUBTITLE"); self.LNE_CNTT_SUBTITLE.setClearButtonEnabled(True)
+        self.CHK_CNTT_DISPDATE = QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_DISPDATE.setObjectName("CHK_CNTT_DISPDATE")
+        self.CHK_CNTT_USEWIDESCR = QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_USEWIDESCR.setObjectName("CHK_CNTT_USEWIDESCR")
+        self.CHK_CNTT_ENABLECBXSCROLL = QCheckBox(self.GBX_PRES_CONTENT); self.CHK_CNTT_ENABLECBXSCROLL.setObjectName("CHK_CNTT_ENABLECBXSCROLL")
+        self.CHK_CNTT_SPLITDIVINE = QCheckBox(self.GBX_GEN_PREFS); self.CHK_CNTT_SPLITDIVINE.setObjectName("CHK_CNTT_SPLITDIVINE")
         
         ## Presentation - Fonts and Colors
-        self.GBX_PRES_FONTSCOLORS = QtWidgets.QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_FONTSCOLORS.setObjectName("GBX_PRES_FONTSCOLORS")
-        self.LBL_FAC_TITLE = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_TITLE.setObjectName("LBL_FAC_TITLE"); self.LBL_FAC_TITLE.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LBL_FAC_SUBTITLE = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_SUBTITLE.setObjectName("LBL_FAC_SUBTITLE"); self.LBL_FAC_SUBTITLE.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LBL_FAC_BODY = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_BODY.setObjectName("LBL_FAC_BODY"); self.LBL_FAC_BODY.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LBL_FAC_ROLE = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_ROLE.setObjectName("LBL_FAC_ROLE"); self.LBL_FAC_ROLE.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.LBL_FAC_NAME = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_NAME.setObjectName("LBL_FAC_NAME"); self.LBL_FAC_NAME.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignTrailing|QtCore.Qt.AlignVCenter)
-        self.FCB_FAC_TITLE = QtWidgets.QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_TITLE.setObjectName("FCB_FAC_TITLE"); self.FCB_FAC_TITLE.setMaximumWidth(140)
-        self.FCB_FAC_SUBITITLE = QtWidgets.QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_SUBITITLE.setObjectName("FCB_FAC_SUBITITLE"); self.FCB_FAC_SUBITITLE.setMaximumWidth(140)
-        self.FCB_FAC_BODY = QtWidgets.QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_BODY.setObjectName("FCB_FAC_BODY"); self.FCB_FAC_BODY.setMaximumWidth(140)
-        self.FCB_FAC_ROLE = QtWidgets.QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_ROLE.setObjectName("FCB_FAC_ROLE"); self.FCB_FAC_ROLE.setMaximumWidth(140)
-        self.FCB_FAC_NAME = QtWidgets.QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_NAME.setObjectName("FCB_FAC_NAME"); self.FCB_FAC_NAME.setMaximumSize(QtCore.QSize(140, 16777215))
-        self.LIN_FAC_DIVIDER = QtWidgets.QFrame(self.GBX_PRES_FONTSCOLORS); self.LIN_FAC_DIVIDER.setObjectName("LIN_FAC_DIVIDER"); self.LIN_FAC_DIVIDER.setFrameShape(QtWidgets.QFrame.HLine); self.LIN_FAC_DIVIDER.setFrameShadow(QtWidgets.QFrame.Sunken)
-        self.LBL_FAC_TITLE_PREV = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_TITLE_PREV.setObjectName("LBL_FAC_TITLE_PREV")
-        self.LBL_FAC_SUBTITLE_PREV = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_SUBTITLE_PREV.setObjectName("LBL_FAC_SUBTITLE_PREV")
-        self.LBL_FAC_BODY_PREV = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_BODY_PREV.setObjectName("LBL_FAC_BODY_PREV")
-        self.LBL_FAC_ROLE_PREV = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_ROLE_PREV.setObjectName("LBL_FAC_ROLE_PREV")
-        self.LBL_FAC_NAME_PREV = QtWidgets.QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_NAME_PREV.setObjectName("LBL_FAC_NAME_PREV")
-        self.BTN_FAC_TITLE = QtWidgets.QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_TITLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_TITLE.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.BTN_FAC_SUBTITLE = QtWidgets.QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_SUBTITLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_SUBTITLE.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.BTN_FAC_BODY = QtWidgets.QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_BODY.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_BODY.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.BTN_FAC_ROLE = QtWidgets.QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_ROLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_ROLE.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.BTN_FAC_NAME = QtWidgets.QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_NAME.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_NAME.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.GBX_PRES_FONTSCOLORS = QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_FONTSCOLORS.setObjectName("GBX_PRES_FONTSCOLORS")
+        self.LBL_FAC_TITLE = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_TITLE.setObjectName("LBL_FAC_TITLE"); self.LBL_FAC_TITLE.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LBL_FAC_SUBTITLE = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_SUBTITLE.setObjectName("LBL_FAC_SUBTITLE"); self.LBL_FAC_SUBTITLE.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LBL_FAC_BODY = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_BODY.setObjectName("LBL_FAC_BODY"); self.LBL_FAC_BODY.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LBL_FAC_ROLE = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_ROLE.setObjectName("LBL_FAC_ROLE"); self.LBL_FAC_ROLE.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.LBL_FAC_NAME = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_NAME.setObjectName("LBL_FAC_NAME"); self.LBL_FAC_NAME.setAlignment(Qt.AlignRight|Qt.AlignTrailing|Qt.AlignVCenter)
+        self.FCB_FAC_TITLE = QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_TITLE.setObjectName("FCB_FAC_TITLE"); self.FCB_FAC_TITLE.setMaximumWidth(140)
+        self.FCB_FAC_SUBITITLE = QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_SUBITITLE.setObjectName("FCB_FAC_SUBITITLE"); self.FCB_FAC_SUBITITLE.setMaximumWidth(140)
+        self.FCB_FAC_BODY = QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_BODY.setObjectName("FCB_FAC_BODY"); self.FCB_FAC_BODY.setMaximumWidth(140)
+        self.FCB_FAC_ROLE = QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_ROLE.setObjectName("FCB_FAC_ROLE"); self.FCB_FAC_ROLE.setMaximumWidth(140)
+        self.FCB_FAC_NAME = QFontComboBox(self.GBX_PRES_FONTSCOLORS); self.FCB_FAC_NAME.setObjectName("FCB_FAC_NAME"); self.FCB_FAC_NAME.setMaximumSize(QtCore.QSize(140, 16777215))
+        self.LIN_FAC_DIVIDER = QFrame(self.GBX_PRES_FONTSCOLORS); self.LIN_FAC_DIVIDER.setObjectName("LIN_FAC_DIVIDER"); self.LIN_FAC_DIVIDER.setFrameShape(QFrame.HLine); self.LIN_FAC_DIVIDER.setFrameShadow(QFrame.Sunken)
+        self.LBL_FAC_TITLE_PREV = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_TITLE_PREV.setObjectName("LBL_FAC_TITLE_PREV")
+        self.LBL_FAC_SUBTITLE_PREV = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_SUBTITLE_PREV.setObjectName("LBL_FAC_SUBTITLE_PREV")
+        self.LBL_FAC_BODY_PREV = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_BODY_PREV.setObjectName("LBL_FAC_BODY_PREV")
+        self.LBL_FAC_ROLE_PREV = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_ROLE_PREV.setObjectName("LBL_FAC_ROLE_PREV")
+        self.LBL_FAC_NAME_PREV = QLabel(self.GBX_PRES_FONTSCOLORS); self.LBL_FAC_NAME_PREV.setObjectName("LBL_FAC_NAME_PREV")
+        self.BTN_FAC_TITLE = QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_TITLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_TITLE.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.BTN_FAC_SUBTITLE = QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_SUBTITLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_SUBTITLE.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.BTN_FAC_BODY = QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_BODY.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_BODY.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.BTN_FAC_ROLE = QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_ROLE.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_ROLE.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.BTN_FAC_NAME = QPushButton(self.GBX_PRES_FONTSCOLORS); self.BTN_FAC_NAME.setObjectName("BTN_FAC_COLORPICKER"); self.BTN_FAC_NAME.setMaximumSize(QtCore.QSize(30, 16777215))
         
         ## Presentation - Background
-        self.GBX_PRES_BACKGROUND = QtWidgets.QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_BACKGROUND.setObjectName("GBX_PRES_BACKGROUND")
-        self.BTN_BG_BROWSE = QtWidgets.QPushButton(self.GBX_PRES_BACKGROUND); self.BTN_BG_BROWSE.setObjectName("BTN_BG_BROWSE"); self.BTN_BG_BROWSE.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.BTN_BG_DISCARD = QtWidgets.QPushButton(self.GBX_PRES_BACKGROUND); self.BTN_BG_DISCARD.setObjectName("BTN_BG_DISCARD"); self.BTN_BG_DISCARD.setMaximumSize(QtCore.QSize(30, 16777215))
-        self.LBL_BG_PREVIEW = QtWidgets.QLabel(self.GBX_PRES_BACKGROUND); self.LBL_BG_PREVIEW.setObjectName("LBL_BG_PREVIEW"); self.LBL_BG_PREVIEW.setAlignment(QtCore.Qt.AlignCenter)
-        self.PIX_BG_PREVIEW = QtWidgets.QLabel(self.GBX_PRES_BACKGROUND); self.PIX_BG_PREVIEW.setObjectName("PIX_BG_PREVIEW"); self.PIX_BG_PREVIEW.setAlignment(QtCore.Qt.AlignCenter)        
-        self.PIX_BG_PREVIEW.setPixmap(QtGui.QPixmap(PKG.IMG_BACKGROUND).scaledToHeight(self.BG_SCALING, QtCore.Qt.KeepAspectRatio & Qt.SmoothTransformation))
+        self.GBX_PRES_BACKGROUND = QGroupBox(self.TAB_PRESENTATION); self.GBX_PRES_BACKGROUND.setObjectName("GBX_PRES_BACKGROUND")
+        self.BTN_BG_BROWSE = QPushButton(self.GBX_PRES_BACKGROUND); self.BTN_BG_BROWSE.setObjectName("BTN_BG_BROWSE"); self.BTN_BG_BROWSE.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.BTN_BG_DISCARD = QPushButton(self.GBX_PRES_BACKGROUND); self.BTN_BG_DISCARD.setObjectName("BTN_BG_DISCARD"); self.BTN_BG_DISCARD.setMaximumSize(QtCore.QSize(30, 16777215))
+        self.LBL_BG_PREVIEW = QLabel(self.GBX_PRES_BACKGROUND); self.LBL_BG_PREVIEW.setObjectName("LBL_BG_PREVIEW"); self.LBL_BG_PREVIEW.setAlignment(Qt.AlignCenter)
+        self.PIX_BG_PREVIEW = QLabel(self.GBX_PRES_BACKGROUND); self.PIX_BG_PREVIEW.setObjectName("PIX_BG_PREVIEW"); self.PIX_BG_PREVIEW.setAlignment(Qt.AlignCenter)        
+        self.PIX_BG_PREVIEW.setPixmap(QPixmap(PKG.IMG_BACKGROUND).scaledToHeight(self.BG_SCALING, Qt.KeepAspectRatio & Qt.SmoothTransformation))
         
-        self.BTN_PRES_RESET = QtWidgets.QPushButton(self.TAB_PRESENTATION); self.BTN_PRES_RESET.setObjectName("BTN_PRES_RESET")
+        self.BTN_PRES_RESET = QPushButton(self.TAB_PRESENTATION); self.BTN_PRES_RESET.setObjectName("BTN_PRES_RESET")
 
         ## Members Tab
-        self.TAB_MEMBERS = QtWidgets.QWidget(); self.TAB_MEMBERS.setObjectName("TAB_MEMBERS")
-        self.LNE_MEM_SEARCHADD = QtWidgets.QLineEdit(self.TAB_MEMBERS); self.LNE_MEM_SEARCHADD.setObjectName("LNE_MEM_SEARCHADD"); self.LNE_MEM_SEARCHADD.setClearButtonEnabled(True)
-        self.LST_MEM_MEMBERS = QtWidgets.QListWidget(self.TAB_MEMBERS); self.LST_MEM_MEMBERS.setObjectName("LST_MEM_MEMBERS")
-        self.BTN_MEM_ADD = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_ADD.setObjectName("BTN_MEM_ADD")
-        self.BTN_MEM_EDIT = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_EDIT.setObjectName("BTN_MEM_EDIT"); self.BTN_MEM_EDIT.setEnabled(False)
-        self.BTN_MEM_REMOVE = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_REMOVE.setObjectName("BTN_MEM_REMOVE"); self.BTN_MEM_REMOVE.setEnabled(False)
-        self.BTN_MEM_IMPORT = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_IMPORT.setObjectName("BTN_MEM_IMPORT")
-        self.BTN_MEM_EXPORT = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_EXPORT.setObjectName("BTN_MEM_EXPORT")
-        self.GBX_MEM_DETAILS = QtWidgets.QGroupBox(self.TAB_MEMBERS);  self.GBX_MEM_DETAILS.setObjectName("GBX_MEM_DETAILS")
-        self.LBL_DET_MEMBERS = QtWidgets.QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_MEMBERS.setObjectName("LBL_DET_MEMBERS")
-        self.LBL_DET_MEN = QtWidgets.QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_MEN.setObjectName("LBL_DET_MEN")
-        self.LBL_DET_WOMEN = QtWidgets.QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_WOMEN.setObjectName("LBL_DET_WOMEN")
-        self.LBL_DET_OTHERS = QtWidgets.QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_OTHERS.setObjectName("LBL_DET_OTHERS")
-        self.BTN_MEM_SAVE = QtWidgets.QPushButton(self.TAB_MEMBERS); self.BTN_MEM_SAVE.setObjectName("BTN_MEM_SAVE")
+        self.TAB_MEMBERS = QWidget(); self.TAB_MEMBERS.setObjectName("TAB_MEMBERS")
+        self.LNE_MEM_SEARCHADD = QLineEdit(self.TAB_MEMBERS); self.LNE_MEM_SEARCHADD.setObjectName("LNE_MEM_SEARCHADD"); self.LNE_MEM_SEARCHADD.setClearButtonEnabled(True)
+        self.LST_MEM_MEMBERS = QListWidget(self.TAB_MEMBERS); self.LST_MEM_MEMBERS.setObjectName("LST_MEM_MEMBERS")
+        self.BTN_MEM_ADD = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_ADD.setObjectName("BTN_MEM_ADD")
+        self.BTN_MEM_EDIT = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_EDIT.setObjectName("BTN_MEM_EDIT"); self.BTN_MEM_EDIT.setEnabled(False)
+        self.BTN_MEM_REMOVE = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_REMOVE.setObjectName("BTN_MEM_REMOVE"); self.BTN_MEM_REMOVE.setEnabled(False)
+        self.BTN_MEM_IMPORT = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_IMPORT.setObjectName("BTN_MEM_IMPORT")
+        self.BTN_MEM_EXPORT = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_EXPORT.setObjectName("BTN_MEM_EXPORT")
+        self.GBX_MEM_DETAILS = QGroupBox(self.TAB_MEMBERS);  self.GBX_MEM_DETAILS.setObjectName("GBX_MEM_DETAILS")
+        self.LBL_DET_MEMBERS = QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_MEMBERS.setObjectName("LBL_DET_MEMBERS")
+        self.LBL_DET_MEN = QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_MEN.setObjectName("LBL_DET_MEN")
+        self.LBL_DET_WOMEN = QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_WOMEN.setObjectName("LBL_DET_WOMEN")
+        self.LBL_DET_OTHERS = QLabel(self.GBX_MEM_DETAILS); self.LBL_DET_OTHERS.setObjectName("LBL_DET_OTHERS")
+        self.BTN_MEM_SAVE = QPushButton(self.TAB_MEMBERS); self.BTN_MEM_SAVE.setObjectName("BTN_MEM_SAVE")
 
         ## Spacers
-        SPC_FOOTER_H = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        SPC_GENERAL_V = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_GEN_PRESETS_V = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_PRES_V4 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        SPC_PRES_BG_H = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_PRES_FAC_H = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-        SPC_PRES_CNTT_V = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Minimum)
-        SPC_PRES_V3 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_PRES_V2 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_PRES_V1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-        SPC_MEM_V1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        SPC_FOOTER_H = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        SPC_GENERAL_V = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_GEN_PRESETS_V = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_PRES_V4 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        SPC_PRES_BG_H = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_PRES_FAC_H = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        SPC_PRES_CNTT_V = QSpacerItem(40, 20, QSizePolicy.Preferred, QSizePolicy.Minimum)
+        SPC_PRES_V3 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_PRES_V2 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_PRES_V1 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        SPC_MEM_V1 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
         ## Grid Layouts
-        self.GRID_MEMBERS = QtWidgets.QGridLayout(self.TAB_MEMBERS); self.GRID_MEMBERS.setObjectName("GRID_MEMBERS")
-        self.GRID_MAIN = QtWidgets.QGridLayout(self.WGT_CENTRAL); self.GRID_MAIN.setObjectName("GRID_MAIN")
-        self.GRID_GENERAL = QtWidgets.QGridLayout(self.TAB_GENERAL); self.GRID_GENERAL.setObjectName("GRID_GENERAL")
-        self.GRID_PRES_BG = QtWidgets.QGridLayout(self.GBX_PRES_BACKGROUND); self.GRID_PRES_BG.setObjectName("GRID_PRES_BG")
-        self.GRID_PRESENTATION = QtWidgets.QGridLayout(self.TAB_PRESENTATION); self.GRID_PRESENTATION.setObjectName("GRID_PRESENTATION")
-        self.GRID_PRES_FAC = QtWidgets.QGridLayout(self.GBX_PRES_FONTSCOLORS); self.GRID_PRES_FAC.setObjectName("GRID_PRES_FAC")
-        self.GRID_GEN_APPEARANCE = QtWidgets.QGridLayout(self.GBX_GEN_APPEARANCE); self.GRID_GEN_APPEARANCE.setObjectName("GRID_GEN_APPEARANCE")
-        self.GRID_PRES_CONTENT = QtWidgets.QGridLayout(self.GBX_PRES_CONTENT); self.GRID_PRES_CONTENT.setObjectName("GRID_PRES_CONTENT")
-        self.GRID_MEM_DET = QtWidgets.QGridLayout(self.GBX_MEM_DETAILS); self.GRID_MEM_DET.setObjectName("GRID_MEM_DET")
-        self.GRID_GEN_PRESETS = QtWidgets.QGridLayout(self.GBX_GEN_PRESETS); self.GRID_GEN_PRESETS.setObjectName("GRID_GEN_PRESETS")
+        self.GRID_MEMBERS = QGridLayout(self.TAB_MEMBERS); self.GRID_MEMBERS.setObjectName("GRID_MEMBERS")
+        self.GRID_MAIN = QGridLayout(self.WGT_CENTRAL); self.GRID_MAIN.setObjectName("GRID_MAIN")
+        self.GRID_GENERAL = QGridLayout(self.TAB_GENERAL); self.GRID_GENERAL.setObjectName("GRID_GENERAL")
+        self.GRID_PRES_BG = QGridLayout(self.GBX_PRES_BACKGROUND); self.GRID_PRES_BG.setObjectName("GRID_PRES_BG")
+        self.GRID_PRESENTATION = QGridLayout(self.TAB_PRESENTATION); self.GRID_PRESENTATION.setObjectName("GRID_PRESENTATION")
+        self.GRID_PRES_FAC = QGridLayout(self.GBX_PRES_FONTSCOLORS); self.GRID_PRES_FAC.setObjectName("GRID_PRES_FAC")
+        self.GRID_GEN_APPEARANCE = QGridLayout(self.GBX_GEN_PREFS); self.GRID_GEN_APPEARANCE.setObjectName("GRID_GEN_APPEARANCE")
+        self.GRID_PRES_CONTENT = QGridLayout(self.GBX_PRES_CONTENT); self.GRID_PRES_CONTENT.setObjectName("GRID_PRES_CONTENT")
+        self.GRID_MEM_DET = QGridLayout(self.GBX_MEM_DETAILS); self.GRID_MEM_DET.setObjectName("GRID_MEM_DET")
+        self.GRID_GEN_PRESETS = QGridLayout(self.GBX_GEN_PRESETS); self.GRID_GEN_PRESETS.setObjectName("GRID_GEN_PRESETS")
 
         ## Layering
         ## Main
@@ -2231,7 +2419,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.TBW_SETTINGS.addTab(self.TAB_MEMBERS, "")
 
         ## General Tab
-        self.GRID_GENERAL.addWidget(self.GBX_GEN_APPEARANCE, 0, 0, 1, 1)
+        self.GRID_GENERAL.addWidget(self.GBX_GEN_PREFS, 0, 0, 1, 1)
         self.GRID_GENERAL.addWidget(self.GBX_GEN_PRESETS, 1, 0, 1, 1)
         self.GRID_GENERAL.addItem(SPC_GENERAL_V, 2, 0, 1, 1)
 
@@ -2262,6 +2450,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.GRID_PRES_CONTENT.addWidget(self.LNE_CNTT_SUBTITLE, 1, 1, 1, 1)
         self.GRID_PRES_CONTENT.addWidget(self.CHK_CNTT_DISPDATE, 2, 0, 1, 2)
         self.GRID_PRES_CONTENT.addWidget(self.CHK_CNTT_USEWIDESCR, 3, 0, 1, 2)
+        self.GRID_PRES_CONTENT.addWidget(self.CHK_CNTT_SPLITDIVINE, 4, 0, 1, 2)
 
         self.GRID_PRES_FAC.addWidget(self.LBL_FAC_TITLE, 0, 0, 1, 1)
         self.GRID_PRES_FAC.addWidget(self.FCB_FAC_TITLE, 0, 1, 1, 1)
@@ -2312,13 +2501,15 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         ## Initialization
         self.setupDisplay()
         self.setupValidators()
+        GEN.setup()
+        PRT.setup()
         MEM.setup()
         self.TBW_SETTINGS.setCurrentIndex(0)
         self.setupConnections()
 
     
     def setupValidators(self):
-        self.LNE_MEM_SEARCHADD.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. -]+")))
+        self.LNE_MEM_SEARCHADD.setValidator(QRegExpValidator(QRegExp("[a-z-A-Z. -]+")))
 
 
     def setupDisplay(self):
@@ -2328,11 +2519,12 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
 
         ## General Tab
         self.TBW_SETTINGS.setTabText(self.TBW_SETTINGS.indexOf(self.TAB_GENERAL), "General")
-        self.GBX_GEN_APPEARANCE.setTitle("Appearance")
+        self.GBX_GEN_PREFS.setTitle("Preferences")
         self.GBX_GEN_PRESETS.setTitle("Presets")
         self.CHK_GEN_ALWAYS_ON_TOP.setText("Always on top")
         self.CHK_GEN_USE_SUGGESTED.setText("Automatically use suggested participant")
         self.CHK_CNTT_ENABLECBXSCROLL.setText("Change participant when scrolling through field")
+        self.CHK_CNTT_SPLITDIVINE.setText("Separate Divine service from Sabbath School")
         self.BTN_GEN_IMPORT.setToolTip("Import a preset")
         self.BTN_GEN_MODIFY.setToolTip("Modify this preset")
         self.BTN_GEN_REMOVE.setToolTip("Remove this preset from this list")
@@ -2396,6 +2588,15 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         self.LNE_CNTT_TITLE.textChanged.connect(lambda: UIB.updatePackage())
         self.LNE_CNTT_SUBTITLE.textChanged.connect(lambda: UIB.updatePackage())
 
+        ## General Tab
+        self.CHK_GEN_ALWAYS_ON_TOP.clicked.connect(lambda: GEN.toggleAoT(self.CHK_GEN_ALWAYS_ON_TOP.isChecked()))
+
+
+        ## Presentation Tab
+        self.CHK_CNTT_SPLITDIVINE.clicked.connect(lambda: PRT.toggleSplitDivine(self.CHK_CNTT_SPLITDIVINE.isChecked()))
+        self.CHK_CNTT_DISPDATE.clicked.connect(lambda: PRT.toggleDispDate(self.CHK_CNTT_DISPDATE.isChecked()))
+
+
         ## Members
         self.LNE_MEM_SEARCHADD.mouseReleaseEvent = lambda event: MEM.searchClicked(event)
         self.LNE_MEM_SEARCHADD.textChanged.connect(lambda: MEM.checkSearchAdd())
@@ -2409,15 +2610,19 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
 
 
         ## Exceptions
+        self.CHK_GEN_USE_SUGGESTED.setEnabled(False)
+        self.CHK_CNTT_USEWIDESCR.setCheckState(3)
         self.CHK_CNTT_USEWIDESCR.setEnabled(False)
-        self.CHK_GEN_ALWAYS_ON_TOP.setEnabled(False)
+        self.CHK_CNTT_ENABLECBXSCROLL.setEnabled(False)
+        
+
 
 
     def keyPressEvent(self, event):
-        if event.key() == QtCore.Qt.Key_Escape:
+        if event.key() == Qt.Key_Escape:
             self.closeEvent()
 
-        if event.key() in [QtCore.Qt.Key_Enter, QtCore.Qt.Key_Return]:
+        if event.key() in [Qt.Key_Enter, Qt.Key_Return]:
             ## Shortcut Key for Adding
             if self.LNE_MEM_SEARCHADD.hasFocus():
                 MEM.addNewMember()
@@ -2430,11 +2635,11 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         """
         if SYS.GLOBAL_STATE == 3: return
         if self.CHANGED:
-            MSG_BOX = QtWidgets.QMessageBox()
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
-            MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
+            MSG_BOX = QMessageBox()
+            MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON))
+            MSG_BOX.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            MSG_BOX.setIcon(QMessageBox.Question)
+            MSG_BOX.setDefaultButton(QMessageBox.No)
             MSG_BOX.setText("You have unsaved changes\nDo you want to save your preferences?")
             MSG_BOX.setWindowTitle(SW.NAME)
             MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
@@ -2442,7 +2647,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
             CORE.centerInsideWindow(MSG_BOX, UIB)
             
             RET = MSG_BOX.exec_()
-            if RET == QtWidgets.QMessageBox.Yes:
+            if RET == QMessageBox.Yes:
                 self.saveChanges()
             else:
                 PKG.restart()
@@ -2477,7 +2682,7 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         
         ## Restore window / Show
         self.show()
-        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
         self.activateWindow()
 
         ## Re-initialize variable
@@ -2501,11 +2706,11 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         """
         Customizes the background image
         """
-        PATH_BGIMG = QtWidgets.QFileDialog.getOpenFileName(None, 'Browse for Hymnal Package', os.getcwd(),
-                    f'Images ({" ".join(["*.{}".format(fo.data().decode()) for fo in QtGui.QImageReader.supportedImageFormats()])})'.format())
+        PATH_BGIMG = QFileDialog.getOpenFileName(None, 'Browse for Hymnal Package', os.getcwd(),
+                    f'Images ({" ".join(["*.{}".format(fo.data().decode()) for fo in QImageReader.supportedImageFormats()])})'.format())
                     
         if PATH_BGIMG[0] != '':   
-            self.PIX_BG_PREVIEW.setPixmap(QtGui.QPixmap(PATH_BGIMG[0]).scaledToHeight(85, QtCore.Qt.KeepAspectRatio & Qt.SmoothTransformation))
+            self.PIX_BG_PREVIEW.setPixmap(QPixmap(PATH_BGIMG[0]).scaledToHeight(85, Qt.KeepAspectRatio & Qt.SmoothTransformation))
             PKG.IMG_BACKGROUND = PATH_BGIMG[0]
             self.updateBackgroundImage(PATH_BGIMG[0])
 
@@ -2532,12 +2737,77 @@ class QWGT_SETTINGS(QtWidgets.QMainWindow):
         Discards and restores the background image to default
         """
         PKG.IMG_BACKGROUND = PKG.DEF_IMG_BACKGROUND
-        self.PIX_BG_PREVIEW.setPixmap(QtGui.QPixmap(PKG.IMG_BACKGROUND).scaledToHeight(self.BG_SCALING, QtCore.Qt.KeepAspectRatio & Qt.SmoothTransformation))
+        self.PIX_BG_PREVIEW.setPixmap(QPixmap(PKG.IMG_BACKGROUND).scaledToHeight(self.BG_SCALING, Qt.KeepAspectRatio & Qt.SmoothTransformation))
         self.updateBackgroundImage(PKG.IMG_BACKGROUND)
 
 
 
 
+class General(object):
+    """
+    Handles all general tab functions from Settings
+    """
+    def __init__(self):
+        pass
+
+    def setup(self):
+        UIB.CHK_GEN_ALWAYS_ON_TOP.setChecked(PKG.ALWAYS_ON_TOP)
+        self.toggleAoT(PKG.ALWAYS_ON_TOP)
+        
+
+    def toggleAoT(self, mode):
+        """
+        Manages Always On Top behavior of all windows
+        """                         
+        WINDOWS = [UIA, UIC, UIB]
+        ACTIVE = [w for w in WINDOWS if not w.isHidden()] ## Record active windows for popup
+
+        if mode:
+            for w in WINDOWS:
+                w.setWindowFlags(w.windowFlags() | Qt.WindowStaysOnTopHint)
+        else:
+            for w in WINDOWS:
+                w.setWindowFlags(w.windowFlags() & ~Qt.WindowStaysOnTopHint)
+
+        for a in ACTIVE: a.show()
+        DCFG['CONFIG'].update({"ALWAYS_ON_TOP": mode})
+        PDB.dump()
+
+
+
+
+class PresentationTab(object):
+    """
+    Handles all presentation tab functions from Settings
+    """
+    def __init__(self):
+        pass
+
+    def setup(self):
+        UIB.CHK_CNTT_SPLITDIVINE.setChecked(PKG.SPLIT_DIVINE)
+        UIB.CHK_CNTT_DISPDATE.setChecked(PKG.PRES_DISPDATE)
+        self.toggleSplitDivine(PKG.SPLIT_DIVINE)
+        self.toggleSplitDivine(PKG.PRES_DISPDATE)
+        
+
+    def toggleSplitDivine(self, mode):
+        """
+        Handles switch for participant splitter
+        """               
+        DCFG['CONFIG'].update({"SPLIT_DIVINE": mode})
+        PDB.dump()
+        
+
+    def toggleDispDate(self, mode):
+        """
+        Manages display of date in exported presentation
+        """               
+        DCFG['CONFIG'].update({"PRES_DISPDATE": mode})
+        PDB.dump()
+
+
+
+    
 class Members(object):
     """
     Handles all member functions from Settings
@@ -2570,7 +2840,6 @@ class Members(object):
         Handles search/add bar (line edit)
         """
         UIB.BTN_MEM_ADD.setToolTip(f'Add {UIB.LNE_MEM_SEARCHADD.text()} to member list')
-
 
         if len(UIB.LNE_MEM_SEARCHADD.text()) < len(self.LAST_INPUT):
             self.SEARCH_STATE = True
@@ -2617,33 +2886,30 @@ class Members(object):
         """
         Constructor method for similar names dialog
         """
+        MSG_BOX = QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
+        MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
+
         if mode == 0:
             LOG.warn(f"Members: Duplicate name detected: {name}")
-            MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Ok); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.Ok)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Warning)
+            MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setStandardButtons(QMessageBox.Ok); MSG_BOX.setDefaultButton(QMessageBox.Ok)
+            MSG_BOX.setIcon(QMessageBox.Warning)
             MSG_BOX.setText(f"{name} is already in the list.")
-            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
 
         elif mode == 1:
             LOG.info(f'Members: Similar names detected: {", ".join(similar)}')
-            MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
+            MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setIcon(QMessageBox.Question)
+            MSG_BOX.setStandardButtons(QMessageBox.Yes | QMessageBox.No); MSG_BOX.setDefaultButton(QMessageBox.No)
             MSG_BOX.setText("The name you entered might be already in the list.\nContinue anyway?")
             MSG_BOX.setDetailedText("Similar name(s):\n\n" + "\n".join(map(str, [f'{str(i+1).zfill(len(str(len(similar))))}. {n}' for i, n in enumerate(similar)])))
-            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
            
         elif mode == 2:
             LOG.info(f'Members: Too few members for exporting')
-            MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
-            MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
-            MSG_BOX.setIcon(QtWidgets.QMessageBox.Question)
-            MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.No)
+            MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+            MSG_BOX.setIcon(QMessageBox.Question)
+            MSG_BOX.setStandardButtons(QMessageBox.Yes | QMessageBox.No); MSG_BOX.setDefaultButton(QMessageBox.No)
             MSG_BOX.setText(f"The list only contains {len(self.getCurrentMembers())} member(s)\nDo you still want to continue?")
-            MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
 
         return MSG_BOX
 
@@ -2655,14 +2921,14 @@ class Members(object):
         • Auto-capitalizes name
         • Auto-fill period after "Bro" or "Sis"
         """
-        NAME = ' '.join(f"{c[0].upper()}{c[1:].lower()}" for c in name.split())                 ## Convert into Name Case which auto-capitalizes first letter of every word
-        try:
-            if NAME.split()[0].lower()[:3] in ['bro', 'sis', 'ptr'] and NAME.split()[0].lower() not in ['brother', 'sister', 'pastor']:
-                if NAME.split()[0][-1] != '.':
-                    NAME = f"{NAME.split()[0]}. {' '.join(map(str, NAME.split()[1:]))}"
-        except IndexError:                                                                      ## Handler for blank field
-            pass
-        return NAME
+        if not len(name.strip()): return name                                                    ## Handler for blank field
+        _name = ' '.join(f"{c[0].upper()}{c[1:].lower()}" for c in name.split())                 ## Convert into Name Case which auto-capitalizes first letter of every word
+
+        if _name.split()[0].lower()[:3] in ['bro', 'sis', 'ptr'] and len(_name.split()[0]) in [3, 4]: 
+            if _name.split()[0][-1] != '.':
+                _name = f"{_name.split()[0]}. {' '.join(map(str, _name.split()[1:]))}"
+
+        return _name
 
 
     def addNewMember(self):
@@ -2677,13 +2943,13 @@ class Members(object):
             self.displayDialog(0, self.getSimilarNames(PROPOSED), PROPOSED).exec_(); return
 
         elif self.hasDuplicateName(PROPOSED):
-            if self.displayDialog(1, self.getSimilarNames(PROPOSED)).exec_() != QtWidgets.QMessageBox.Yes: return
+            if self.displayDialog(1, self.getSimilarNames(PROPOSED)).exec_() != QMessageBox.Yes: return
 
         UIB.LNE_MEM_SEARCHADD.clear()
         UIB.LST_MEM_MEMBERS.addItem(self.adjustNameFormat(PROPOSED))
         UIB.LST_MEM_MEMBERS.sortItems()
         self.CACHED_MEMBERS = self.getCurrentMembers()
-        UIB.LST_MEM_MEMBERS.findItems(self.adjustNameFormat(PROPOSED), QtCore.Qt.MatchExactly)[0].setSelected(True)
+        UIB.LST_MEM_MEMBERS.findItems(self.adjustNameFormat(PROPOSED), Qt.MatchExactly)[0].setSelected(True)
         self.SAVE_STATE = False
         self.generalRefresh()
 
@@ -2696,16 +2962,16 @@ class Members(object):
 
         class DLG_RENAME(QtWidgets.QDialog):
             def __init__(self, parent = None):
-                QtWidgets.QWidget.__init__(self, parent)
+                QWidget.__init__(self, parent)
                 self.setWindowTitle(SW.NAME)
                 self.setFixedSize(270, 110)
-                self.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON))
-                self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint)
-                self.GRID_MAIN = QtWidgets.QGridLayout(self); self.GRID_MAIN.setObjectName("GRID_MAIN")
-                self.LBL_RENAME = QtWidgets.QLabel(self); self.LBL_RENAME.setObjectName("LBL_RENAME")
-                SPC_V1 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-                SPC_V2 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
-                self.LNE_RENAME = QtWidgets.QLineEdit(self); self.LNE_RENAME.setObjectName("LNE_RENAME")
+                self.setWindowIcon(QIcon(SYS.RES_APP_ICON))
+                self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+                self.GRID_MAIN = QGridLayout(self); self.GRID_MAIN.setObjectName("GRID_MAIN")
+                self.LBL_RENAME = QLabel(self); self.LBL_RENAME.setObjectName("LBL_RENAME")
+                SPC_V1 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+                SPC_V2 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+                self.LNE_RENAME = QLineEdit(self); self.LNE_RENAME.setObjectName("LNE_RENAME")
                 self.LNE_RENAME.setValidator(QtGui.QRegExpValidator(QtCore.QRegExp("[a-z-A-Z. -]+")))
                 self.BTN_BOX = QtWidgets.QDialogButtonBox(self); self.BTN_BOX.setObjectName("BTN_BOX")
                 self.BTN_BOX.setStandardButtons(QtWidgets.QDialogButtonBox.Cancel|QtWidgets.QDialogButtonBox.Ok)
@@ -2734,7 +3000,7 @@ class Members(object):
                         MEM.displayDialog(0, MEM.getSimilarNames(NEW_NAME), NEW_NAME).exec_(); return
 
                     elif MEM.hasDuplicateName(NEW_NAME, OLD_NAME):
-                        if MEM.displayDialog(1, MEM.getSimilarNames(NEW_NAME)).exec_() != QtWidgets.QMessageBox.Yes: return     
+                        if MEM.displayDialog(1, MEM.getSimilarNames(NEW_NAME)).exec_() != QMessageBox.Yes: return     
 
                     UIB.LST_MEM_MEMBERS.selectedItems()[0].setText(MEM.adjustNameFormat(NEW_NAME))
                     MEM.CACHED_MEMBERS = MEM.getCurrentMembers()         
@@ -2837,17 +3103,17 @@ class Members(object):
         
 
     def importMemberList(self):
-        FILE, EXT = QtWidgets.QFileDialog.getOpenFileName(None, "Import Member List", PKG.DIR_IMPORT_MEMLIST, f'*.{SYS.EXT_MEMLIST}')
+        FILE, EXT = QFileDialog.getOpenFileName(None, "Import Member List", PKG.DIR_IMPORT_MEMLIST, f'*.{SYS.EXT_MEMLIST}')
         if FILE:
             try:
                 with open(FILE, 'rb') as f:
                     LOAD = json.loads(bz2.decompress(f.read()).decode('utf-8'))
             except (OSError, json.decoder.JSONDecodeError) as e:
                 LOG.error(f'Invalid member list file: {FILE}')
-                MSG_BOX = QtWidgets.QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
-                MSG_BOX.setWindowIcon(QtGui.QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
-                MSG_BOX.setStandardButtons(QtWidgets.QMessageBox.Ok); MSG_BOX.setDefaultButton(QtWidgets.QMessageBox.Ok)
-                MSG_BOX.setIcon(QtWidgets.QMessageBox.Warning)
+                MSG_BOX = QMessageBox(); MSG_BOX.setWindowTitle(SW.NAME)
+                MSG_BOX.setWindowIcon(QIcon(SYS.RES_APP_ICON)); MSG_BOX.setWindowFlags(Qt.WindowStaysOnTopHint)
+                MSG_BOX.setStandardButtons(QMessageBox.Ok); MSG_BOX.setDefaultButton(QMessageBox.Ok)
+                MSG_BOX.setIcon(QMessageBox.Warning)
                 MSG_BOX.setText(f"File is corrupted or invalid.")
                 MSG_BOX.setStyleSheet('QPushButton {min-width: 50px;}')
                 MSG_BOX.exec_()
@@ -2866,12 +3132,12 @@ class Members(object):
         Export current values into a encrypted JSON file
         """
         if len(self.CACHED_MEMBERS) < self.ITEMS_THRESHOLD:
-            if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
+            if self.displayDialog(2).exec_() != QMessageBox.Yes: return
 
         MEMBERS = {"MEMBER_LIST": self.CACHED_MEMBERS, "DATE_GENERATED": time.time()}
         MEMBERS = json.dumps(MEMBERS, indent=None, sort_keys=True)
         
-        FILE, EXT = QtWidgets.QFileDialog.getSaveFileName(None, "Export Member List", PKG.DIR_EXPORT_MEMLIST, "*.prt")
+        FILE, EXT = QFileDialog.getSaveFileName(None, "Export Member List", PKG.DIR_EXPORT_MEMLIST, "*.prt")
         if FILE:
             LOG.info(f"Saving exported member list to {FILE}")
             try:
@@ -2893,7 +3159,7 @@ class Members(object):
         Saves the current member list
         """
         if len(self.CACHED_MEMBERS) < self.ITEMS_THRESHOLD and not bypassDialog:
-            if self.displayDialog(2).exec_() != QtWidgets.QMessageBox.Yes: return
+            if self.displayDialog(2).exec_() != QMessageBox.Yes: return
             
         DCFG['POOL'].update({"NAMES": self.CACHED_MEMBERS})
         PDB.dump()
@@ -2915,14 +3181,159 @@ class Settings(object):
 
 
 
+class QWGT_PARSER(QMainWindow):
+    """
+    Parser window 
+    Mostly for UI-related functions only.
+
+    Alias UIC (User Interface C / Parser)
+    """
+    def __init__(self, parent = None):
+        QWidget.__init__(self, parent)
+        self.CACHED_TEXT = ''
+
+
+    def setupUI(self):
+        ## Window
+        self.setObjectName("WIN_PARSER")
+        self.setFixedSize(500, 400)
+        self.setWindowIcon(QIcon(SYS.RES_APP_ICON))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+
+        self.WGT_CENTRAL = QtWidgets.QWidget(self); self.WGT_CENTRAL.setObjectName("WGT_CENTRAL")
+        self.GRID_MAIN = QGridLayout(self.WGT_CENTRAL); self.GRID_MAIN.setObjectName("GRID_MAIN")
+        self.PTE_SOURCE = QPlainTextEdit(self.WGT_CENTRAL); self.PTE_SOURCE.setObjectName("PTE_SOURCE")
+        self.GRID_ROLE = QGridLayout(); self.GRID_ROLE.setObjectName("GRID_ROLE")
+        self.BTN_COPY_ROLE = QPushButton(self.WGT_CENTRAL); self.BTN_COPY_ROLE.setObjectName("BTN_COPY_ROLE")
+        self.LST_OUTPUT_ROLE = QListWidget(self.WGT_CENTRAL); self.LST_OUTPUT_ROLE.setObjectName("PTE_OUTPUT_ROLE")
+        self.GRID_NAME = QGridLayout(); self.GRID_NAME.setObjectName("GRID_NAME")
+        self.BTN_COPY_NAME = QPushButton(self.WGT_CENTRAL); self.BTN_COPY_NAME.setObjectName("BTN_COPY_NAME")
+        self.LST_OUTPUT_NAME = QListWidget(self.WGT_CENTRAL); self.LST_OUTPUT_NAME.setObjectName("PTE_OUTPUT_NAME")
+        self.LYT_FOOTER = QHBoxLayout(); self.LYT_FOOTER.setObjectName("LYT_FOOTER")
+        self.BTN_COPYALL = QPushButton(self.WGT_CENTRAL); self.BTN_COPYALL.setObjectName("BTN_COPYALL")
+        self.LBL_OUTPUT = QLabel(self.WGT_CENTRAL); self.LBL_OUTPUT.setObjectName("LBL_OUTPUT")
+
+        spacerItem = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        spacerItem1 = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        spacerItem2 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        ## Layout
+        self.LYT_FOOTER.addItem(spacerItem2)
+        self.LYT_FOOTER.addWidget(self.BTN_COPYALL)
+        self.GRID_MAIN.addWidget(self.PTE_SOURCE, 0, 0, 1, 2)
+        self.GRID_ROLE.addWidget(self.BTN_COPY_ROLE, 0, 1, 1, 1)
+        self.GRID_ROLE.addItem(spacerItem, 1, 1, 1, 1)
+        self.GRID_ROLE.addWidget(self.LST_OUTPUT_ROLE, 0, 0, 2, 1)
+        self.GRID_MAIN.addLayout(self.GRID_ROLE, 2, 0, 1, 1)
+        self.GRID_NAME.addWidget(self.BTN_COPY_NAME, 0, 1, 1, 1)
+        self.GRID_NAME.addItem(spacerItem1, 1, 1, 1, 1)
+        self.GRID_NAME.addWidget(self.LST_OUTPUT_NAME, 0, 0, 2, 1)
+        self.GRID_MAIN.addLayout(self.GRID_NAME, 2, 1, 1, 1)
+        self.GRID_MAIN.addLayout(self.LYT_FOOTER, 3, 0, 1, 2)
+        self.GRID_MAIN.addWidget(self.LBL_OUTPUT, 1, 0, 1, 2)
+        self.setCentralWidget(self.WGT_CENTRAL)
+
+        self.setupDisplay()
+        self.setupConnections()
+
+
+    def setupDisplay(self):
+        self.setWindowTitle("Participant Parser (Beta)")
+        self.PTE_SOURCE.setPlaceholderText("Paste participant list here separated by lines.")
+        self.BTN_COPYALL.setText("Copy all")
+        self.LBL_OUTPUT.setText("Output")
+
+    
+    def setupConnections(self):
+        self.PTE_SOURCE.textChanged.connect(lambda: self.parseSource())
+        self.BTN_COPY_ROLE.clicked.connect(lambda: self.copyOutput(0))
+        self.BTN_COPY_NAME.clicked.connect(lambda: self.copyOutput(1))
+        self.LST_OUTPUT_ROLE.currentItemChanged.connect(lambda: self.copyItem(0))
+        self.LST_OUTPUT_NAME.currentItemChanged.connect(lambda: self.copyItem(1))
+        self.BTN_COPYALL.clicked.connect(lambda: self.copyOutput(2))
+        self.VS_RL = self.LST_OUTPUT_ROLE.verticalScrollBar()
+        self.VS_NM = self.LST_OUTPUT_NAME.verticalScrollBar()
+        self.VS_RL.valueChanged.connect(partial(self.moveScrollbar, self.VS_NM))
+        self.VS_NM.valueChanged.connect(partial(self.moveScrollbar, self.VS_RL))
+
+
+    def toggleButtons(self, mode):
+        self.BTN_COPYALL.setEnabled(mode)
+        self.BTN_COPY_ROLE.setEnabled(mode)
+        self.BTN_COPY_NAME.setEnabled(mode)
+
+
+    def parseSource(self):
+        if not len(self.PTE_SOURCE.toPlainText().strip()):
+            return self.toggleButtons(0)
+        else:
+            self.toggleButtons(1)
+            
+        self.LST_OUTPUT_ROLE.clear()
+        self.LST_OUTPUT_NAME.clear()
+        OUT = PAR.parse(self.PTE_SOURCE.toPlainText())
+        self.CACHED_TEXT = [[], []]
+
+        for i in OUT:
+            if len(i[0]):
+                if not len(i[1]): continue
+                self.LST_OUTPUT_ROLE.addItem(i[0])
+                self.LST_OUTPUT_NAME.addItem(i[1])
+                self.CACHED_TEXT[0].append(i[0])
+                self.CACHED_TEXT[1].append(i[1])
+
+
+    def copyItem(self, mode):
+        try:
+            if not mode:
+                pyperclip.copy(self.LST_OUTPUT_ROLE.currentItem().text())
+            elif mode == 1:
+                pyperclip.copy(self.LST_OUTPUT_NAME.currentItem().text())
+        except AttributeError:
+            pass
+
+
+    def copyOutput(self, mode):
+        try:
+            if not mode: pyperclip.copy('\n'.join(map(str, self.CACHED_TEXT[0])))
+            elif mode == 1: pyperclip.copy('\n'.join(map(str, self.CACHED_TEXT[1])))
+            else: pyperclip.copy('\n'.join([f"{i[0]}: {i[1]}"
+                                for i in PAR.parse(self.PTE_SOURCE.toPlainText())]))
+        except IndexError:
+            pass
+
+
+    def moveScrollbar(self, obj, value):
+        obj.setValue(value)
+                    
+
+    def enterWindow(self):
+        """
+        Triggers after UIA's parser button was clicked
+
+        Also handles dynamic position of the window depending on UIA's pos
+        """
+        ## Spawn settings at center of UIA
+        if self.isHidden():
+            CORE.centerInsideWindow(self, UIA)
+        
+        ## Restore window / Show
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+        self.activateWindow()
+
+
+
+
+
 if __name__ == '__main__':
     INIT_TIME = time.time()
     
     ## Create Application
-    APP = QtWidgets.QApplication(sys.argv)
+    APP = QApplication(sys.argv)
 
     ## Primary Software Initialization & Logging
-    SW = KSoftware("Participants", "1.0.8", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Release")
+    SW = KSoftware("Participants", "1.0.9", "Ken Verdadero, Reynald Ycong", file=__file__, parentName="MSDAC Systems", prodYear=2022, versionName="Release")
     LOG = KLog(System().DIR_LOG, __file__, SW.LOG_NAME_DATE(), SW.PY_NAME, SW.AUTHOR, cont=True, tms=True, delete_existing=True, tmsformat="%H:%M:%S.%f %m/%d/%y")
 
     SYS = System()
@@ -2942,14 +3353,19 @@ if __name__ == '__main__':
     EXP = Export()
     FMN = FileManager()
     STT = Settings()
+    GEN = General()
+    PRT = PresentationTab()
     MEM = Members()
+    PAR = ParticipantParser()
 
     LOG.info('Initializing UI')
     UIA = QWGT_PARTICIPANTS()
     UIB = QWGT_SETTINGS()
+    UIC = QWGT_PARSER()
     
     UIA.setupUI()
     UIB.setupUI()
+    UIC.setupUI()
 
     UIA.closeEvent = lambda event: SYS.closeEvent(event)
 
@@ -2965,7 +3381,7 @@ if __name__ == '__main__':
 
     SYS.STARTUP_TIME = time.time()-INIT_TIME
     LOG.info(f'Initialization completed in {round(SYS.STARTUP_TIME, 3)} seconds.')
+    SYS.GLOBAL_STATE = 1
     sys.exit(APP.exec_())
-    
 
 
