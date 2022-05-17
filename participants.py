@@ -1783,7 +1783,7 @@ class Export(object):
                 PARA_SUBTITLE.font.name = PKG.FONT_SUBTITLE
 
                 ## Date
-                if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+                if PKG.PRES_DISPDATE== True:
                     TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
                     FRM_DATE = TBX_DATE.text_frame
                     PARA_DATE = FRM_DATE.paragraphs[0]
@@ -1863,7 +1863,7 @@ class Export(object):
 
             ## 16:9 Ratio
             self.PRS.slide_width, self.PRS.slide_height = Inches(16), Inches(9)
-            if DCFG['CONFIG']['SPLIT_DIVINE'] == True:
+            if PKG.SPLIT_DIVINE== True:
                 splitDivine(self)
                 generatePerSlide(self)
                 
@@ -1900,7 +1900,7 @@ class Export(object):
             PARA_SUBTITLE.font.name = PKG.FONT_SUBTITLE
 
             ## Date
-            if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+            if PKG.PRES_DISPDATE== True:
                 TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
                 FRM_DATE = TBX_DATE.text_frame
                 PARA_DATE = FRM_DATE.paragraphs[0]
@@ -1996,7 +1996,7 @@ class Export(object):
 
 
             ## Date
-            if DCFG['CONFIG']['PRES_DISPDATE'] == True:
+            if PKG.PRES_DISPDATE== True:
                 TBX_DATE = SLD_MAIN.shapes.add_textbox(0, Cm(4.2), self.PRS.slide_width, Cm(4))
                 FRM_DATE = TBX_DATE.text_frame
                 PARA_DATE = FRM_DATE.paragraphs[0]
@@ -2770,6 +2770,7 @@ class General(object):
                 w.setWindowFlags(w.windowFlags() & ~Qt.WindowStaysOnTopHint)
 
         for a in ACTIVE: a.show()
+        PKG.ALWAYS_ON_TOP = mode 
         DCFG['CONFIG'].update({"ALWAYS_ON_TOP": mode})
         PDB.dump()
 
@@ -2787,13 +2788,15 @@ class PresentationTab(object):
         UIB.CHK_CNTT_SPLITDIVINE.setChecked(PKG.SPLIT_DIVINE)
         UIB.CHK_CNTT_DISPDATE.setChecked(PKG.PRES_DISPDATE)
         self.toggleSplitDivine(PKG.SPLIT_DIVINE)
-        self.toggleSplitDivine(PKG.PRES_DISPDATE)
+        self.toggleDispDate(PKG.PRES_DISPDATE)
         
 
     def toggleSplitDivine(self, mode):
         """
         Handles switch for participant splitter
         """               
+        PKG.SPLIT_DIVINE = mode
+        p(PKG.SPLIT_DIVINE)
         DCFG['CONFIG'].update({"SPLIT_DIVINE": mode})
         PDB.dump()
         
@@ -2802,6 +2805,7 @@ class PresentationTab(object):
         """
         Manages display of date in exported presentation
         """               
+        PKG.PRES_DISPDATE = mode 
         DCFG['CONFIG'].update({"PRES_DISPDATE": mode})
         PDB.dump()
 
